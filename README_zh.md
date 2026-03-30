@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>基于 Java 的智能思考系统 - 快思考/慢思考多模式智能体框架</strong>
+  <strong>基于 Java 的智能思考系统 - 统一单智能体执行框架</strong>
 </p>
 
 [![Java](https://img.shields.io/badge/Java-21+-orange)](https://openjdk.java.net/projects/jdk/21/)
@@ -19,19 +19,18 @@
 
 ## 📋 项目概述
 
-OpenManusJava 是一个基于 Spring Boot 和 LangChain4j 开发的智能思考系统，它采用"快思考/慢思考"双模式架构，结合了直接输出的效率与思考-执行-反思循环的深度。该系统能够根据任务复杂度自动或手动选择最合适的思考模式，大幅提升复杂任务的处理质量。
+OpenManusJava 是一个基于 Spring Boot 和 LangChain4j 开发的智能系统。当前采用扁平化单智能体架构：一个 ReAct 循环、统一工具注册、跨轮次连续 ChatMemory 上下文。
 
 ### 🎯 功能特性
 
-#### 🧠 多模式智能思考
-- **快思考模式**: 直接执行，高效响应，适合简单任务
-- **慢思考模式**: 思考-执行-反思循环，适合复杂任务
-- **自动模式**: 根据任务复杂度智能选择思考模式
+#### 🧠 统一单智能体推理
+- **单一 ReAct 循环**: 由 `UnifiedAgent` 统一驱动规划、工具调用与最终回答。
+- **移除 Agent Handoff**: 不再使用 Supervisor/子 Agent 字符串中转。
+- **会话连续记忆**: 使用 `ChatMemory` 保留完整消息历史。
 
-#### 💭 智能Agent系统
-- **FastThinkWorkflow**: 快速响应工作流
-- **ThinkDoReflectWorkflow**: 循环反思工作流
-- **多种专业Agent**: 思考、执行、反思等专业智能体
+#### 💭 统一工作流
+- **UnifiedWorkflow**: HTTP 对话与流式执行共享一个入口。
+- **统一工具挂载**: 浏览、文件、Python、反思工具直接挂载到同一 Agent。
 
 #### 🔧 工具生态
 - **代码执行能力**: 执行代码并分析结果
@@ -67,16 +66,8 @@ graph TD
     
     Controller --> Service[AgentService]
     
-    subgraph "工作流"
-        Service -->|复杂任务| TDR[ThinkDoReflectWorkflow<br/>深度思考]
-        Service -->|简单任务| FT[FastThinkWorkflow<br/>快速响应]
-    end
-    
-    TDR --> TA[ThinkingAgent<br/>分析规划]
-    TA --> EA[ExecutionAgent<br/>执行任务]
-    EA --> RA[ReflectionAgent<br/>结果评估]
-    RA -->|任务完成| FinalResult[最终结果]
-    RA -->|需要继续| TA
+    Service --> Workflow[UnifiedWorkflow]
+    Workflow --> UA[UnifiedAgent<br/>单一 ReAct 循环]
     
     subgraph "工具层"
         CodeTool[代码执行工具]
@@ -84,11 +75,12 @@ graph TD
         SearchTool[信息检索工具]
     end
     
-    EA --> CodeTool
-    EA --> FileTool
-    EA --> SearchTool
-    
-    FT --> FinalResult
+    UA --> CodeTool
+    UA --> FileTool
+    UA --> SearchTool
+    UA --> ReflectionTool[反思工具]
+
+    UA --> FinalResult[最终结果]
     FinalResult --> WebSocket --> UI
 ```
 
@@ -97,7 +89,7 @@ graph TD
 | **组件** | **技术选型** | **用途** |
 |----------|-------------|---------|
 | **后端框架** | Spring Boot 3.2.0 | 应用核心框架 |
-| **AI集成** | LangChain4j 1.1.0 | LLM对接与多智能体协作 |
+| **AI集成** | LangChain4j 1.1.0 | LLM 对接与单智能体 ReAct 执行 |
 | **前端** | Vue.js 3 + Element Plus | 现代化、响应式用户界面 |
 | **实时通信** | WebSocket + STOMP | 前后端实时消息与日志流 |
 | **API** | RESTful API | 服务接口 |
@@ -142,15 +134,75 @@ graph TD
 
 如需 Docker Compose 一键启动，请参考：`docs/QUICK_START.md`。
 
+## 🧠 长上下文参数建议（推荐）
+
+如需“有工具调用就持续循环”并控制长上下文膨胀，建议在 `application-local.yml` 中配置 `openmanus.chat-memory`。
+
+- **保持工具循环不断**  
+  设置 `react-max-iterations: 0`（无限轮次）。  
+  可配合 `react-max-execution-seconds`、`react-repeated-tool-call-threshold` 作为安全兜底。
+- **控制模型输入体积**  
+  同时使用消息窗口（`model-context-max-messages`、`model-context-max-total-messages`）和近似 token 预算（`model-context-max-approx-tokens`）。
+- **处理超大工具结果**  
+  开启无损卸载（`tool-result-offload-enabled`）+ 按需回填（`tool-result-rehydrate-enabled`）。
+
+建议三档参数：
+
+```yaml
+openmanus:
+  chat-memory:
+    # A) 高保真（上下文连续性最好，token 成本更高）
+    model-context-max-messages: 0
+    model-context-max-total-messages: 0
+    model-context-max-approx-tokens: 0
+    react-max-iterations: 0
+    tool-result-offload-enabled: false
+    tool-result-rehydrate-enabled: false
+```
+
+```yaml
+openmanus:
+  chat-memory:
+    # B) 平衡档（推荐默认，适合长会话）
+    model-context-max-messages: 24
+    model-context-max-total-messages: 48
+    model-context-max-approx-tokens: 12000
+    react-max-iterations: 0
+    react-max-execution-seconds: 600
+    react-repeated-tool-call-threshold: 8
+    tool-result-offload-enabled: true
+    tool-result-offload-min-chars: 12000
+    tool-result-rehydrate-enabled: true
+    tool-result-rehydrate-max-chars: 8000
+    tool-result-rehydrate-max-per-round: 2
+```
+
+```yaml
+openmanus:
+  chat-memory:
+    # C) 省成本档（严格控制上下文）
+    model-context-max-messages: 12
+    model-context-max-total-messages: 20
+    model-context-max-approx-tokens: 6000
+    react-max-iterations: 0
+    react-max-execution-seconds: 300
+    react-repeated-tool-call-threshold: 6
+    tool-result-offload-enabled: true
+    tool-result-offload-min-chars: 8000
+    tool-result-rehydrate-enabled: true
+    tool-result-rehydrate-max-chars: 4000
+    tool-result-rehydrate-max-per-round: 1
+```
+
 ## 📊 使用方式
 
 ### 统一 API 入口
 
-所有交互都通过统一的流式 API `think-do-reflect-stream` 进行，该 API 会自动处理并返回实时进度。
+所有交互都通过统一的流式 API `workflow-stream` 进行，该 API 会自动处理并返回实时进度。
 
 ```bash
 # 示例请求
-curl -X POST http://localhost:8089/api/agent/think-do-reflect-stream \
+curl -X POST http://localhost:8089/api/agent/workflow-stream \
   -H "Content-Type: application/json" \
   -d '{"input": "分析一下春节期间旅游行业的发展趋势"}'
 ```

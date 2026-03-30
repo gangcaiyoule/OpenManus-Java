@@ -1,5 +1,7 @@
 package com.openmanus.agent.tool;
 
+import com.openmanus.domain.service.SessionSandboxManager;
+import com.openmanus.agent.tool.support.SandboxPathResolver;
 import com.openmanus.infra.sandbox.ExecutionResult;
 import com.openmanus.infra.sandbox.SandboxClient;
 import dev.langchain4j.agent.tool.P;
@@ -11,7 +13,6 @@ import org.springframework.stereotype.Component;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 /**
  * Python 代码执行工具
@@ -30,10 +31,16 @@ public class PythonTool {
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     
     private final SandboxClient sandboxClient;
+    private final SandboxPathResolver sandboxPathResolver;
+
+    public PythonTool(SandboxClient sandboxClient, SessionSandboxManager sessionSandboxManager) {
+        this(sandboxClient, new SandboxPathResolver(sessionSandboxManager));
+    }
     
     @Autowired
-    public PythonTool(SandboxClient sandboxClient) {
+    public PythonTool(SandboxClient sandboxClient, SandboxPathResolver sandboxPathResolver) {
         this.sandboxClient = sandboxClient;
+        this.sandboxPathResolver = sandboxPathResolver;
     }
     
     /**
@@ -43,7 +50,11 @@ public class PythonTool {
     public String executePython(
             @P("思考过程或代码计划的简要说明") String thought,
             @P("要执行的Python代码") String code) {
-        log.info("执行 Python 代码，思考: {}", thought);
+        if (code == null || code.isBlank()) {
+            return "执行失败: Python代码不能为空";
+        }
+        String safeThought = thought == null ? "(empty)" : thought;
+        log.info("执行 Python 代码，思考: {}", safeThought);
         log.debug("代码内容: {}", code.length() > 100 ? code.substring(0, 100) + "..." : code);
         
         try {
@@ -64,7 +75,7 @@ public class PythonTool {
         log.info("执行 Python 文件: {}", filePath);
         
         try {
-            Path path = Paths.get(filePath);
+            Path path = resolveSandboxPath(filePath);
             if (!Files.exists(path)) {
                 return "文件不存在: " + filePath;
             }
@@ -74,10 +85,20 @@ public class PythonTool {
             ExecutionResult result = sandboxClient.executePython(code, DEFAULT_TIMEOUT_SECONDS);
             return formatExecutionResult(result);
             
+        } catch (SecurityException e) {
+            log.warn("Python 文件访问被安全策略拒绝: {}", e.getMessage());
+            return "执行失败: " + e.getMessage();
         } catch (Exception e) {
             log.error("Python 文件执行失败: {}", filePath, e);
             return "执行失败: " + e.getMessage();
         }
+    }
+
+    /**
+     * 将用户路径解析到当前会话沙盒目录，并阻止路径逃逸。
+     */
+    private Path resolveSandboxPath(String userPath) {
+        return sandboxPathResolver.resolveSandboxPath(userPath);
     }
     
     /**

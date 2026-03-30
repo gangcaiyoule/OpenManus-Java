@@ -31,6 +31,11 @@ public class WorkflowResponse {
      * 错误信息，如果有的话
      */
     private String error;
+
+    /**
+     * 错误码，用于稳定的程序化处理（状态码映射、重试策略等）
+     */
+    private String errorCode;
     
     /**
      * VNC 沙箱浏览器 URL

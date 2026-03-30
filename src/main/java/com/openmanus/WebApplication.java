@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.event.EventListener;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 
+import java.util.Map;
+
 /**
  * OpenManus Main Application Class
  * A minimalist AI Agent framework based on langchain4j and langgraph4j
@@ -23,7 +25,9 @@ public class WebApplication {
 
     public static void main(String[] args) {
         logger.info("? Starting OpenManus-Java");
-        SpringApplication.run(WebApplication.class, args);
+        SpringApplication application = new SpringApplication(WebApplication.class);
+        application.setDefaultProperties(Map.of("server.port", "8089"));
+        application.run(args);
         logger.info("? OpenManus-Java started successfully!");
     }
 

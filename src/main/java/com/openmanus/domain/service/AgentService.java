@@ -1,7 +1,8 @@
 package com.openmanus.domain.service;
 
-import com.openmanus.agent.workflow.FastThinkWorkflow;
+import com.openmanus.agent.workflow.UnifiedWorkflow;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -10,51 +11,50 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.regex.Pattern;
 
 /**
- * 快思考服务 - 处理需要快速响应的简单任务
- * 
- * 这个服务基于MultiAgentHandoffWorkflow（快思考工作流），专注于：
- * 1. 简单明确的任务
- * 2. 需要快速响应的场景
- * 3. 对话式交互
- * 
- * 与ThinkDoReflectService的区别：
- * - AgentService：直接执行，响应迅速，适合简单任务
- * - ThinkDoReflectService：分析规划、执行、反思，适合复杂任务
+ * 统一工作流的 HTTP 对话服务。
  */
 @Service
 @Slf4j
 public class AgentService {
+    private static final Pattern SESSION_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]{1,64}$");
 
-    private final FastThinkWorkflow fastThinkWorkflow;
+    private final UnifiedWorkflow unifiedWorkflow;
 
     @Autowired
-    public AgentService(FastThinkWorkflow fastThinkWorkflow) {
-        this.fastThinkWorkflow = fastThinkWorkflow;
+    public AgentService(UnifiedWorkflow unifiedWorkflow) {
+        this.unifiedWorkflow = unifiedWorkflow;
     }
 
     /**
-     * 快速处理与Agent的对话 - 快思考模式
-     * 适合简单明确的任务和对话式交互
-     * 
+     * 处理 Agent 对话（统一单智能体工作流）。
+     *
      * @param message 用户消息
-     * @param conversationId 会话ID，如果为null则创建新会话
+     * @param conversationId 会话 ID，如果为 null 则创建新会话
      * @param sync 是否同步执行
      * @return 对话结果
      */
     public CompletableFuture<Map<String, Object>> chat(String message, String conversationId, boolean sync) {
-        final String sessionId = conversationId != null ? conversationId : UUID.randomUUID().toString();
+        final String sessionId = normalizeSessionId(conversationId);
+
+        if (message == null || message.trim().isEmpty()) {
+            Map<String, Object> errorResult = new HashMap<>();
+            errorResult.put("error", "message不能为空");
+            errorResult.put("conversationId", sessionId);
+            return CompletableFuture.completedFuture(errorResult);
+        }
         
         if (sync) {
             // 同步执行
-            try {
-                String response = fastThinkWorkflow.executeSync(message);
+            try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", sessionId)) {
+                String response = unifiedWorkflow.executeSync(message, sessionId);
                 Map<String, Object> result = new HashMap<>();
                 result.put("answer", response);
                 result.put("conversationId", sessionId);
                 result.put("timestamp", LocalDateTime.now().toString());
-                result.put("mode", "fast_thinking");
+                result.put("mode", "unified");
                 return CompletableFuture.completedFuture(result);
             } catch (Exception e) {
                 log.error("Error in sync chat execution", e);
@@ -65,13 +65,14 @@ public class AgentService {
             }
         } else {
             // 异步执行
-            return fastThinkWorkflow.execute(message)
+            try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", sessionId)) {
+                return unifiedWorkflow.execute(message, sessionId)
                 .thenApply(response -> {
                     Map<String, Object> result = new HashMap<>();
                     result.put("answer", response);
                     result.put("conversationId", sessionId);
                     result.put("timestamp", LocalDateTime.now().toString());
-                    result.put("mode", "fast_thinking");
+                    result.put("mode", "unified");
                     return result;
                 })
                 .exceptionally(e -> {
@@ -81,6 +82,21 @@ public class AgentService {
                     errorResult.put("conversationId", sessionId);
                     return errorResult;
                 });
+            }
         }
     }
-} 
+
+    static String normalizeSessionId(String rawConversationId) {
+        if (rawConversationId == null) {
+            return UUID.randomUUID().toString();
+        }
+        String trimmed = rawConversationId.trim();
+        if (trimmed.isEmpty()) {
+            return UUID.randomUUID().toString();
+        }
+        if (!SESSION_ID_PATTERN.matcher(trimmed).matches()) {
+            return UUID.randomUUID().toString();
+        }
+        return trimmed;
+    }
+}

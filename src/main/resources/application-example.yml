@@ -18,6 +18,29 @@ openmanus:
       timeout: 120
       # 请在 application-local.yml 中设置真实的 API key
       api-key: "your-dashscope-api-key-here"
+    # 新增：多 Provider 配置（aiframework 使用）
+    providers:
+      openai:
+        api-type: "openai"
+        model: "gpt-4o-mini"
+        base-url: "https://api.openai.com/v1"
+        api-key: "your-openai-api-key"
+        timeout: 120
+        max-retries: 1
+      anthropic:
+        api-type: "anthropic"
+        model: "claude-3-5-sonnet-latest"
+        base-url: "https://api.anthropic.com"
+        api-key: "your-anthropic-api-key"
+        timeout: 120
+        max-retries: 1
+      gemini:
+        api-type: "gemini"
+        model: "gemini-1.5-pro"
+        base-url: "https://generativelanguage.googleapis.com"
+        api-key: "your-gemini-api-key"
+        timeout: 120
+        max-retries: 1
 
   sandbox:
     type: "docker"
@@ -52,6 +75,98 @@ openmanus:
     enabled: false
     max-steps: 20
     timeout: 300
+
+  legacy-mapping:
+    # 是否启用 legacy 会话ID文件沙盒映射的采样 warn 日志
+    # 也可通过环境变量 OPENMANUS_LEGACY_MAPPING_WARN_ENABLED 覆盖
+    warn-enabled: false
+    # warn 采样率（<=0 自动回退为 200）
+    # 也可通过环境变量 OPENMANUS_LEGACY_MAPPING_WARN_SAMPLE_RATE 覆盖
+    warn-sample-rate: 200
+
+  chat-memory:
+    # 配置优先级：显式配置 > 环境变量/系统属性 fallback > 默认值
+    # 存储类型: file(默认) | in-memory
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_STORE_TYPE 覆盖
+    store-type: "file"
+    # 持久化 ChatMemoryStore 的文件目录
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_FILE_STORE_DIR 覆盖
+    file-store-dir: "/tmp/openmanus/chat-memory"
+    # 会话文件保留天数；启动时清理更早的历史文件
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_RETENTION_DAYS 覆盖
+    retention-days: 30
+    # 读取到损坏 JSON 时是否先隔离到 corrupted/ 目录
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_QUARANTINE_CORRUPTED_FILES 覆盖
+    quarantine-corrupted-files: true
+    # 是否启用工具结果压缩；默认 false 保持完整消息传递
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_TOOL_RESULTS_ENABLED 覆盖
+    compact-tool-results-enabled: false
+    # 工具结果写入长期 memory 的最大字符数
+    # 仅在 compact-tool-results-enabled=true 时生效
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_MAX_CHARS 覆盖
+    tool-result-max-chars: 4000
+    # 工具结果压缩时保留的前缀长度
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_HEAD_CHARS 覆盖
+    compact-tool-result-head-chars: 300
+    # 工具结果压缩时保留的后缀长度
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_TAIL_CHARS 覆盖
+    compact-tool-result-tail-chars: 200
+    # 每轮发送给模型的历史消息上限，0 表示不限制（默认）
+    # 配置为负值会自动回退为 0（不限制）
+    # 仅影响模型输入窗口，不影响 ChatMemory 持久化全量历史
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_MESSAGES 覆盖
+    model-context-max-messages: 0
+    # 每轮发送给模型的总消息上限（历史 + 当前轮），0 表示不限制（默认）
+    # 配置为负值会自动回退为 0（不限制）
+    # 用于约束一次 execute 内多轮工具调用导致的输入膨胀
+    # 当配置为 1 时，仅保证保留当前轮关键消息（优先当前用户问题）
+    # 当存在工具多轮调用时，建议 >=3（可同时容纳当前 user + tool result + 关键上下文）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_TOTAL_MESSAGES 覆盖
+    model-context-max-total-messages: 0
+    # 每轮模型输入的近似 token 预算（基于字符估算），默认 128000
+    # 如需关闭该预算限制可显式设置为 0
+    # 与 message 条数窗口协同生效，优先保留当前 user / system / 最新 tool result
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_APPROX_TOKENS 覆盖
+    model-context-max-approx-tokens: 128000
+    # 单次 execute 的 ReAct 最大轮数，0 表示不按轮数截断（只要持续产出工具调用就继续）
+    # 建议结合 react-max-execution-seconds 一起使用
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_REACT_MAX_ITERATIONS 覆盖
+    react-max-iterations: 0
+    # 单次 execute 的最长执行秒数，0 表示不限制（默认）
+    # 如需防止异常链路长时间占用资源，可显式设置 >0
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_REACT_MAX_EXECUTION_SECONDS 覆盖
+    react-max-execution-seconds: 0
+    # 重复工具调用批次保护阈值（连续出现同一组工具调用 name+arguments 超过阈值则中止）
+    # 0 表示关闭保护（默认）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_REACT_REPEATED_TOOL_CALL_THRESHOLD 覆盖
+    react-repeated-tool-call-threshold: 0
+    # 是否启用超大工具结果的无损卸载（写入 artifact 文件，memory 中保留索引卡片）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_ENABLED 覆盖
+    tool-result-offload-enabled: true
+    # 触发卸载的最小字符数（<=0 会回退为默认值）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_MIN_CHARS 覆盖
+    tool-result-offload-min-chars: 12000
+    # 卸载卡片中保留的前缀字符数（用于快速感知结果语义）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_HEAD_CHARS 覆盖
+    tool-result-offload-head-chars: 240
+    # 卸载卡片中保留的后缀字符数（用于保留结尾关键信息）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_TAIL_CHARS 覆盖
+    tool-result-offload-tail-chars: 160
+    # 工具结果 artifact 存储目录
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_STORE_DIR 覆盖
+    tool-result-artifact-store-dir: "/tmp/openmanus/tool-result-artifacts"
+    # 每个会话保留的 artifact 索引条目上限（超过会自动裁剪，防止长会话索引无限膨胀）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY 覆盖
+    tool-result-artifact-max-index-entries-per-memory: 20000
+    # 是否在模型输入阶段按需回填已卸载的工具结果
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_ENABLED 覆盖
+    tool-result-rehydrate-enabled: true
+    # 每条回填工具结果的最大字符数
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_CHARS 覆盖
+    tool-result-rehydrate-max-chars: 8000
+    # 每轮最多回填多少条工具结果（默认 2，0 表示不限制）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND 覆盖
+    tool-result-rehydrate-max-per-round: 2
 
 # Spring Boot Configuration
 server:

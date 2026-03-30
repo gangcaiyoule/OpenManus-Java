@@ -35,7 +35,9 @@ public class AgentExecutionTracker {
     private final Map<String, AgentExecutionEvent> activeAgents = new ConcurrentHashMap<>();
     private final Map<String, DetailedExecutionFlow> detailedFlows = new ConcurrentHashMap<>();
     private final Map<String, DetailedExecutionFlow.ExecutionPhase> currentPhases = new ConcurrentHashMap<>();
-    private final List<AgentExecutionEventListener> listeners = new CopyOnWriteArrayList<>();
+    private static final String GLOBAL_LISTENER_BUCKET = "\u0000GLOBAL_LISTENER_BUCKET";
+    private static final String LEGACY_RESERVED_GLOBAL_LISTENER_BUCKET = "__all__";
+    private final Map<String, List<AgentExecutionEventListener>> listenersBySession = new ConcurrentHashMap<>();
     
     // ==================== 核心事件追踪方法 ====================
     
@@ -178,29 +180,84 @@ public class AgentExecutionTracker {
         activeAgents.remove(sessionId);
         detailedFlows.remove(sessionId);
         currentPhases.remove(sessionId);
+        listenersBySession.remove(sessionId);
         log.info("Session cleared: {}", sessionId);
     }
     
     // ==================== 观察者模式：事件监听 ====================
     
+    /**
+     * @deprecated 仅兼容历史调用。新代码必须使用 addListener(sessionId, listener)。
+     */
+    @Deprecated
     public void addListener(AgentExecutionEventListener listener) {
-        listeners.add(listener);
-        log.debug("Listener added: {}", listener.getClass().getSimpleName());
+        addListener(GLOBAL_LISTENER_BUCKET, listener);
     }
-    
+
+    public void addListener(String sessionId, AgentExecutionEventListener listener) {
+        validateSessionScopedListenerId(sessionId);
+        String key = listenerBucket(sessionId);
+        listenersBySession.computeIfAbsent(key, ignored -> new CopyOnWriteArrayList<>()).add(listener);
+        log.debug("Listener added: sessionId={}, listener={}", key, listener.getClass().getSimpleName());
+    }
+
+    /**
+     * @deprecated 仅兼容历史调用。新代码必须使用 removeListener(sessionId, listener)。
+     */
+    @Deprecated
     public void removeListener(AgentExecutionEventListener listener) {
-        listeners.remove(listener);
-        log.debug("Listener removed: {}", listener.getClass().getSimpleName());
+        removeListener(GLOBAL_LISTENER_BUCKET, listener);
+    }
+
+    public void removeListener(String sessionId, AgentExecutionEventListener listener) {
+        validateSessionScopedListenerId(sessionId);
+        String key = listenerBucket(sessionId);
+        List<AgentExecutionEventListener> bucket = listenersBySession.get(key);
+        if (bucket == null) {
+            return;
+        }
+        bucket.remove(listener);
+        if (bucket.isEmpty()) {
+            listenersBySession.remove(key, bucket);
+        }
+        log.debug("Listener removed: sessionId={}, listener={}", key, listener.getClass().getSimpleName());
     }
     
     private void notifyListeners(AgentExecutionEvent event) {
-        listeners.forEach(listener -> {
+        notifyListenerBucket(GLOBAL_LISTENER_BUCKET, event);
+        if (event != null && event.getSessionId() != null) {
+            notifyListenerBucket(event.getSessionId(), event);
+        }
+    }
+
+    private void notifyListenerBucket(String sessionId, AgentExecutionEvent event) {
+        List<AgentExecutionEventListener> bucket = listenersBySession.get(listenerBucket(sessionId));
+        if (bucket == null) {
+            return;
+        }
+        bucket.forEach(listener -> {
             try {
                 listener.onEvent(event);
             } catch (Exception e) {
                 log.error("Error notifying listener: {}", listener.getClass().getSimpleName(), e);
             }
         });
+    }
+
+    private String listenerBucket(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return GLOBAL_LISTENER_BUCKET;
+        }
+        return sessionId;
+    }
+
+    private void validateSessionScopedListenerId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId must not be blank for session-scoped listener");
+        }
+        if (LEGACY_RESERVED_GLOBAL_LISTENER_BUCKET.equals(sessionId)) {
+            throw new IllegalArgumentException("sessionId '__all__' is reserved for internal compatibility");
+        }
     }
     
     /**

@@ -36,8 +36,21 @@ public class VncSandboxClient implements Closeable {
     
     private final DockerClientManager dockerManager;
     private final String hostAddress;
+    private final boolean enabled;
     
     public VncSandboxClient(OpenManusProperties properties) {
+        boolean useSandbox = properties != null
+                && properties.getSandbox() != null
+                && properties.getSandbox().isUseSandbox();
+        if (!useSandbox) {
+            this.enabled = false;
+            this.dockerManager = null;
+            this.hostAddress = resolveHostAddress();
+            log.info("VNC 沙箱已禁用（openmanus.sandbox.use-sandbox=false）");
+            return;
+        }
+
+        this.enabled = true;
         this.dockerManager = new DockerClientManager();
         this.hostAddress = resolveHostAddress();
         
@@ -51,6 +64,7 @@ public class VncSandboxClient implements Closeable {
      * @return VNC 沙箱信息（包含容器 ID 和访问 URL）
      */
     public VncSandboxInfo createVncSandbox(String sessionId) {
+        ensureEnabled();
         try {
             log.info("创建 VNC 沙箱，会话ID: {}", sessionId);
             
@@ -115,6 +129,9 @@ public class VncSandboxClient implements Closeable {
      * 销毁 VNC 沙箱
      */
     public void destroyVncSandbox(String containerId) {
+        if (!enabled || dockerManager == null) {
+            return;
+        }
         dockerManager.destroyContainer(containerId);
     }
     
@@ -122,6 +139,9 @@ public class VncSandboxClient implements Closeable {
      * 检查容器是否运行
      */
     public boolean isContainerRunning(String containerId) {
+        if (!enabled || dockerManager == null) {
+            return false;
+        }
         return dockerManager.isContainerRunning(containerId);
     }
     
@@ -149,6 +169,12 @@ public class VncSandboxClient implements Closeable {
         if (dockerManager != null) {
             dockerManager.close();
             log.info("VNC 沙箱客户端已关闭");
+        }
+    }
+
+    private void ensureEnabled() {
+        if (!enabled || dockerManager == null) {
+            throw new IllegalStateException("VNC 沙箱已禁用，未初始化 Docker 客户端");
         }
     }
 }
