@@ -30,6 +30,17 @@
 
 当前实现继续遵守“先最小可运行，再逐步增强”的原则。
 
+当前补充收敛：
+
+- `domain/service` 通过 `WorkflowExecutionPort` 依赖工作流执行能力。
+- `infra/workflow` 通过 `UnifiedWorkflowPortAdapter` 适配 `agent/workflow/UnifiedWorkflow` 到 domain port。
+- `WorkflowStreamService` 通过 `WorkflowExecutionEventPort`、`WorkflowStreamPublisher` 依赖执行事件追踪与 WebSocket 推送，不再直接依赖 runtime tracker 或 `SimpMessagingTemplate`。
+- `SessionSandboxManager` 通过 `SessionSandboxClient`、`LegacySessionMappingPolicy` 依赖沙箱创建和 legacy 映射策略，不再直接依赖 runtime sandbox 抽象。
+- `WebProxyController` 通过 `WebProxyConfigProvider` 读取代理配置，不再直接依赖 runtime proxy config。
+- `SingleAgentArchitectureGuardTest` 守卫 `domain/service` 禁止直接 import `UnifiedWorkflow`。
+- `SingleAgentArchitectureGuardTest` 额外守卫 `domain/**` 禁止直接 import `com.openmanus.aiframework.runtime..`、`SimpMessagingTemplate` 和 runtime proxy config。
+- `Step2AbstractAgentExecutorBuilderRuntimeApiGuardTest` 守卫 `agent` 代码不得直接 import `domain` 包。
+
 ## 3. 当前最小实现
 
 ### 3.1 上下文治理
@@ -47,6 +58,12 @@
 1. 先裁剪历史消息。
 2. 再拼接当前轮消息。
 3. 最后执行总量与近似 token 预算。
+
+当前阶段接受的最小边界：
+
+- `TaskExecutionState` 当前只允许作为上下文治理的辅助卡片进入模型输入，用于保留最小计划/进度线索。
+- 当前不把它视为阶段 C 的完整任务态能力验收项，不继续叠加新字段、新策略或额外抽象。
+- 若后续需要增强任务态恢复、失败归因或待办管理，统一延后到阶段 C 再展开。
 
 ### 3.2 CodeAct 最小闭环
 
@@ -94,8 +111,9 @@
 
 - 优先识别 `failure`。
 - 其次识别 `error`。
-- 再识别 `skipped`，其中包含 `Assumption failed` 时输出该分类。
+- 再识别 `skipped`，其中包含 `Assumption failed` 时输出该分类，否则输出 `skipped`。
 - 全部 non-skipped 时输出 `first issue: none`。
+- 若 surefire 报告全为 non-skipped，脚本最终继续透传 `mvn` 退出码，避免误把 Maven 级失败判成通过。
 
 ## 4. 当前测试口径
 
@@ -106,7 +124,7 @@
 - 工具结果压缩与回填测试。
 - 配置装配与运行时守卫测试。
 - live smoke 统一通过 `scripts/run-live-smoke.sh` 进入；其内部仍只使用 `scripts/mvnw-local.sh` 作为 Maven 入口，并在执行后汇总 surefire 结果。
-- `LiveSmokeScriptIntegrationTest` 覆盖 live smoke 汇总脚本的成功、失败优先级、跳过、缺报告与旧报告清理边界。
+- `LiveSmokeScriptIntegrationTest` 覆盖 live smoke 汇总脚本的成功、失败优先级、assumption skipped / plain skipped、缺报告、旧报告清理、`mvnw-local.sh` 缺失或不可执行分支，以及 Maven 退出码透传边界。
 
 当前结论：
 
@@ -119,18 +137,13 @@
 ### 5.1 外部门禁未闭环
 
 - `scripts/mvnw-local.sh` 已可收口本地 `JAVA_HOME` 前置条件。
-- `scripts/run-live-smoke.sh` 已可自动回填 live smoke 统计与首个问题分类。
+- `scripts/run-live-smoke.sh` 已可自动回填 live smoke 统计与首个问题分类，并在 `mvnw-local.sh` 不可执行时直接失败。
 - 当前仍缺少三组 `OPENMANUS_LIVE_*` 变量，导致 live smoke 全部 skipped。
-
-### 5.2 `domain -> agent` 依赖仍需收敛
-
-- `domain/service` 仍直接依赖 `UnifiedWorkflow` 具体实现。
-- 后续应通过“最小端口 + agent 适配 + 守卫测试”收敛。
 
 ## 6. 下一步实现顺序
 
 1. 先完成 live smoke non-skipped 证据闭环。
-2. 再推进 `domain/service -> UnifiedWorkflow` 的最小端口化改造。
+2. 若真实 Provider 验收失败，再按脚本输出收敛到具体 Provider 或传输层问题。
 3. 在上述稳定后，再讨论上下文增强或 MCP 接入。
 
 ## 7. 维护约定

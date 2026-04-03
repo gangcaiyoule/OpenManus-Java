@@ -12,15 +12,16 @@
 
 - 同一会话未注入 OpenAI / Anthropic / Gemini 三组 `OPENMANUS_LIVE_*` 环境变量。
 - 真实 Provider 验收仍全部 skipped，缺少 non-skipped 证据。
+- `AbstractAgentExecutor` 已默认注入最小任务态卡片，当前只能按“阶段 A 允许的辅助上下文”收口，不能继续向阶段 C 扩张。
 
 ## 当前主线
 
-1. 保持阶段边界不变，只把“真实 Provider 验收证据闭环”作为当前主线。
-2. 以现有离线回归与分层收口结果作为阶段 A 的已完成基础，不再把 `domain` 分层问题继续保留为当前阻塞。
-3. 当前不做“阶段完成型 commit”，只允许围绕当前阶段入口的文档收敛类小步提交。
+1. 保持阶段 A 验收口径不变，只推进真实 Provider 的 non-skipped 证据闭环。
+2. 任务态上下文当前仅按最小卡片注入视为阶段 A 的辅助治理实现，不追加字段、策略或额外抽象。
+3. `WebProxyController` 职责偏重记为后续收口项，但不插队到当前主线之前。
 
-## 下一步
+## 下一步入口
 
-1. 在同一会话注入三组 `OPENMANUS_LIVE_*` 环境变量。
-2. 复跑 `./scripts/run-live-smoke.sh`。
-3. 若结果 non-skipped，则回填阶段完成结论；若失败，则按脚本输出继续收敛到具体 Provider 或传输层问题。
+1. 在同一会话注入 OpenAI / Anthropic / Gemini 所需 `OPENMANUS_LIVE_*` 环境变量。
+2. 复跑 `./scripts/run-live-smoke.sh`，记录 `tests / failures / errors / skipped` 与首个问题分类。
+3. 若结果 non-skipped，则更新阶段 A 完成结论；若失败，则只沿脚本输出收敛到具体 Provider 或传输层问题。
