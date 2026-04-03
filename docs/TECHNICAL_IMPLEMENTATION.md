@@ -84,10 +84,11 @@
 
 当前最小链路：
 
-1. `scripts/run-live-smoke.sh` 固定通过 `scripts/mvnw-local.sh` 执行 `*LiveSmokeTest`。
-2. 测试结束后读取 `target/surefire-reports/TEST-*LiveSmokeTest.xml`。
-3. 汇总 `tests/failures/errors/skipped`，并输出首个问题分类。
-4. 若存在 `failure/error/skipped` 或缺少报告，脚本直接失败。
+1. `scripts/run-live-smoke.sh` 先清理旧的 `TEST-*LiveSmokeTest.xml`，避免误读历史报告。
+2. 固定通过 `scripts/mvnw-local.sh` 执行 `*LiveSmokeTest`。
+3. 测试结束后读取 `target/surefire-reports/TEST-*LiveSmokeTest.xml`。
+4. 汇总 `tests/failures/errors/skipped`，并输出首个问题分类。
+5. 若存在 `failure/error/skipped` 或缺少报告，脚本直接失败。
 
 当前分类规则保持简单：
 
@@ -105,7 +106,7 @@
 - 工具结果压缩与回填测试。
 - 配置装配与运行时守卫测试。
 - live smoke 统一通过 `scripts/run-live-smoke.sh` 进入；其内部仍只使用 `scripts/mvnw-local.sh` 作为 Maven 入口，并在执行后汇总 surefire 结果。
-- `LiveSmokeScriptIntegrationTest` 覆盖 live smoke 汇总脚本的成功、跳过、缺报告分支。
+- `LiveSmokeScriptIntegrationTest` 覆盖 live smoke 汇总脚本的成功、失败优先级、跳过、缺报告与旧报告清理边界。
 
 当前结论：
 
