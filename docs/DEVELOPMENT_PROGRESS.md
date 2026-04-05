@@ -6,9 +6,9 @@
 - 阶段：**阶段 A 验收收口**
 - 状态：**Blocked**
 - 阶段边界：只收口“单 Agent + 上下文治理 A + CodeAct A + 最小工具结果压缩/按需回填”。
-- 阶段结论：当前工作区实现、编译与测试复验结果仍落在既定阶段边界内；阶段 A 唯一未闭环项仍是真实 Provider live smoke 验收。
-- 验证现状：`./scripts/mvnw-local.sh -q -DskipTests compile` 通过；`./scripts/mvnw-local.sh -q -DskipITs test` 通过；`./scripts/run-live-smoke.sh` 未进入代码执行阶段，直接失败在 Anthropic / Gemini 环境变量校验。
-- 提交判断：当前不做阶段 A 代码收口提交；本轮只允许提交文档协调信息，避免在 live smoke 未闭环前混入新的阶段性代码结论。
+- 当前结论：实现、分层与离线验证仍符合阶段 A 边界；唯一未闭环项仍是真实 Provider live smoke 验收。
+- 当前验证：`./scripts/mvnw-local.sh -q -DskipTests compile` 与 `./scripts/mvnw-local.sh -q -DskipITs test` 已通过；`./scripts/run-live-smoke.sh` 仍停在 Anthropic / Gemini 环境变量校验，尚未进入仓库代码路径。
+- 提交判断：本轮适合只提交进度文档收敛，不做新的阶段 A 代码结论提交。
 
 ## 当前阻塞
 
@@ -21,10 +21,10 @@
 
 - 主线目标：只完成阶段 A 验收收口，不再扩展上下文治理、CodeAct、MCP 或 Multi-Agent 实现面。
 - 推进顺序：先补齐 Anthropic / Gemini live smoke 环境，再复跑统一验收脚本，再根据首个非环境失败点决定是否进入最小修复。
-- 范围控制：若 live smoke 仍停在环境或脚本入口，停止在验收准备；只有进入仓库代码路径后，才允许处理首个真实失败点。
+- 范围控制：若 live smoke 仍停在环境或脚本入口，则保持当前代码冻结；只有进入仓库代码路径后，才允许处理首个真实失败点。
 
 ## 下一步入口
 
 1. 在当前 shell 或仓库根目录 `.env` 中补齐 Anthropic 与 Gemini 的 live smoke 变量，或补齐对应 provider profile fallback。
 2. 重新执行 `./scripts/run-live-smoke.sh`。
-3. 若脚本进入仓库代码路径后仍失败，只处理首个失败点，不扩展阶段 A 代码面。
+3. 若脚本进入仓库代码路径后仍失败，只处理首个失败点，并补齐对应测试与文档，不扩展阶段 A 代码面。
