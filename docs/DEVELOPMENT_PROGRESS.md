@@ -6,8 +6,7 @@
 - 阶段：**阶段 A 收口**
 - 状态：**Blocked**
 - 阶段边界：只收口“上下文治理 A + CodeAct A + 最小工具结果压缩/按需回填”的单 Agent 最小链路；不进入上下文治理 B/C、MCP 资源融合或 `Multi-Agent` 实现。
-- 当前判断：主线实现仍围绕单 Agent 阶段 A 收口，`domain -> port -> infra adapter` 与 `WebProxy` 最小安全边界已基本对齐；当前阻塞集中在真实 Provider 验收未闭环，分层守卫增强只能排在其后。
-- commit 判断：**代码主线当前不 commit；本轮可单独 commit 协调文档。** 原因是阶段 A 仍缺真实 Provider non-skipped 验收，但文档已经形成新的当前状态与下一步入口，适合独立留痕。
+- 当前判断：离线主链路已通过回归验证，当前不能切阶段的唯一硬门槛仍是真实 Provider live smoke 未闭环；分层守卫补强属于 live smoke 闭环后的阶段 A 收口项，不提前并行扩张。
 
 ## 当前阻塞
 
@@ -18,23 +17,21 @@
    - `OPENMANUS_LIVE_GEMINI_MODEL`
    - `OPENMANUS_LIVE_GEMINI_BASE_URL`
    - `OPENMANUS_LIVE_GEMINI_API_KEY`
-2. 架构守卫测试已能挡住部分显式 import 回退，但当前仍主要依赖源码字符串扫描；该项属于阶段 A 收口增强，不覆盖真实 Provider 验收阻塞。
+2. 分层守卫当前仍主要依赖源码字符串扫描；在真实 Provider 验收闭环前，该问题只作为下一收口项保留，不单独扩成新阶段。
 
 ## 当前主线
 
 1. 保持阶段 A 单 Agent 收口，不把 `Multi-Agent`、上下文治理 B/C 或 MCP 资源融合带入当前实现边界。
-2. 先以真实 Provider live smoke 闭环作为阶段切换前置条件，其他增强项不抢主线优先级。
-3. 已确认当前最小主线仍成立：
-   - `domain -> port -> infra adapter` 分层方向未偏离。
-   - `WebProxy` base64url 输入约束、目标地址校验和重定向二次校验已经到位。
-4. `2026-04-05` 已重新验证：
-   - `./scripts/mvnw-local.sh -q -DskipITs -Dtest=SingleAgentArchitectureGuardTest,Step2AbstractAgentExecutorBuilderRuntimeApiGuardTest,WebProxyControllerTest,WebProxyServiceTest,HttpUrlConnectionWebProxyAdapterTest,AgentServiceMonitoringIntegrationTest,WorkflowStreamServiceMonitoringIntegrationTest,WorkflowExecutionEventPortAdapterTest,SessionSandboxManagerLifecycleTest,LiveSmokeEnvTest test`
-   - `cd frontend && npm test -- --run`
-   - `cd frontend && npm run build`
-   - `./scripts/run-live-smoke.sh`
+2. 开发顺序固定为：先补齐 Anthropic / Gemini live 配置并打通 `run-live-smoke.sh`，再补强分层守卫，最后再判断阶段 A 是否满足收口条件。
+3. `2026-04-05` 已重新验证：
+   - `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
+   - `cd frontend && npm test -- --run` 通过。
+   - `cd frontend && npm run build` 通过。
+   - `./scripts/run-live-smoke.sh` 在 Maven 前因缺少 Anthropic / Gemini live 变量失败。
 
 ## 下一步入口
 
 1. 在当前 shell 或仓库根目录 `.env` 中补齐 Anthropic / Gemini 两组真实且非空的 `OPENMANUS_LIVE_*` 变量，或补齐对应 provider profile 配置。
 2. 复跑 `./scripts/run-live-smoke.sh`；若仍失败，只处理脚本输出的首个失败点。
-3. live smoke 闭环后，再补 fully-qualified usage 和无 import 直接引用路径的架构守卫增强，避免分层约束继续退化。
+3. live smoke non-skipped 后，补 fully-qualified 跨层引用与无 import 直接引用两类守卫覆盖。
+4. 仅在上述两项完成后，再复核是否允许结束阶段 A；在此之前不扩实现范围。
