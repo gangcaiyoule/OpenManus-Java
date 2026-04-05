@@ -3,14 +3,18 @@
 ## 当前阶段状态
 
 - 日期：**2026-04-05**
-- 阶段：**阶段 A 验收前阻塞**
+- 阶段：**阶段 A 验收阻塞收敛**
 - 状态：**Blocked**
-- 提交判断：**不做阶段 A 收口 commit；仅提交本次协调文档收敛结果**
+- 提交判断：**仅允许文档同步 commit；不做阶段收口 commit**
 - 阶段边界：只收口“单 Agent + 上下文治理 A + CodeAct A + 最小工具结果压缩/按需回填”；不进入上下文治理 B/C、MCP 资源融合或 `Multi-Agent` 实现。
-- 当前结论：
-  - `./scripts/run-live-smoke.sh` 于 `2026-04-05` 复验仍在 Maven 前失败。
-  - 当前唯一有效阻塞仍是真实 Provider 验收未闭环，不是新的仓库内阶段 A 代码缺口。
-  - 当前工作区存在大批在途改动，不能据此做阶段收口判断；本轮只保留协调文档 checkpoint。
+
+## 当前验证结果
+
+1. `./scripts/mvnw-local.sh -q -DskipTests compile` 已通过。
+2. `./scripts/mvnw-local.sh -q -DskipITs test` 已通过。
+3. `cd frontend && npm test -- --run` 已通过。
+4. `cd frontend && npm run build` 已通过。
+5. `./scripts/run-live-smoke.sh` 仍在 Maven 前失败，首个失败点仍是 Anthropic / Gemini live 环境变量缺失。
 
 ## 当前阻塞
 
@@ -27,14 +31,21 @@
 
 ## 当前主线
 
-1. 继续严格按阶段 A 验收闭环推进，不把 `Multi-Agent`、上下文治理 B/C 或 MCP 资源融合带入当前轮。
-2. 当前顺序固定为：先补真实 Provider 配置，再复跑 live smoke，再根据首个失败点决定是否需要阶段 A 内最小修正。
-3. 在真实 Provider 验收通过前，不做阶段收口判断，不合并阶段外改动，不扩大实现范围。
-4. 当前工作区已有大量在途实现，协调动作只记录有效边界与阻塞，不替代代码完成度判断。
+1. 当前主线只做阶段 A 验收收敛，不新增实现范围；默认假设现有代码先不动，先解除环境阻塞。
+2. 执行顺序固定为：
+   1. 补齐 Anthropic / Gemini 真实 Provider 配置。
+   2. 复跑 `./scripts/run-live-smoke.sh`。
+   3. 若仍失败，只处理脚本输出的首个失败点，且该修正必须仍落在阶段 A 边界内。
+   4. 仅在 live smoke 全部 non-skipped 后，才进入阶段 A 收口判断与收口 commit。
+3. 当前阶段的协调任务拆解如下：
+   1. 配置补齐：外部环境准备，不改仓库实现。
+   2. 验收复跑：确认三条真实 Provider 链路状态。
+   3. 首点修正：若存在代码问题，只做最小修正并立即回归。
+   4. 阶段收口：满足验收后再判断是否执行收口提交。
 
 ## 下一步入口
 
 1. 在当前 shell 或仓库根目录 `.env` 中补齐 Anthropic / Gemini 两组真实且非空的 `OPENMANUS_LIVE_*` 变量，或补齐对应 `OPENMANUS_LLM_PROVIDERS_ANTHROPIC_*`、`OPENMANUS_LLM_PROVIDERS_GEMINI_*` 配置。
-2. 重新执行 `./scripts/run-live-smoke.sh`，确认 OpenAI / Anthropic / Gemini 三条链路均形成 non-skipped 结果。
-3. 若 live smoke 仍失败，只处理脚本输出的首个失败点，并确认该问题仍落在阶段 A 边界内。
-4. 待真实 Provider 验收通过后，再单独判断是否进行阶段 A 收口 commit。
+2. 重新执行 `./scripts/run-live-smoke.sh`；本轮复核的首个失败点仍是上述 6 个变量缺失，未出现新的代码级首要阻塞。
+3. 若 live smoke 进入 Maven/测试阶段后仍失败，只跟进新的首个失败点，不并行展开多个修复支线。
+4. 在真实 Provider 验收通过前，不做阶段 A 收口 commit；当前仅允许提交文档同步结果。
