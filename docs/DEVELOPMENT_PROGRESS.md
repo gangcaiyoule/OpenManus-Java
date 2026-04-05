@@ -7,16 +7,13 @@
 - 状态：**Blocked**
 - 提交判断：**当前不做阶段收口 commit；本轮如需同步协调结论，只允许独立文档 commit，且不得混入在途实现变更**
 - 阶段边界：只收口“单 Agent + 上下文治理 A + CodeAct A + 最小工具结果压缩/按需回填”；不进入上下文治理 B/C、MCP 资源融合或 `Multi-Agent` 实现。
-
-## 当前验证结果
-
-1. `./scripts/mvnw-local.sh -q -DskipTests compile` 已通过。
-2. `./scripts/mvnw-local.sh -q -DskipITs test` 已通过。
-3. `cd frontend && npm test -- --run` 已通过，`17` 个测试全部通过。
-4. `cd frontend && npm run build` 已通过。
-5. `2026-04-05` 本轮复跑 `./scripts/run-live-smoke.sh` 仍在 Maven 前失败，首个失败点仍仅是 Anthropic / Gemini live 环境变量缺失。
-6. `2026-04-05` reviewer 结合文档约束与本地回归复核 `agent/context`、`agent/base`、`domain/service`、`infra/config`、`infra/workflow`、`infra/web` 与 `aiframework/tool/mcp` 后，未发现新的阶段边界外扩张、分层回退、过度抽象或离线测试口径遗漏。
-7. 当前工作区仍存在大量在途实现变更；这些变更尚未形成 live smoke non-skipped 验收证据，本轮协调不将其纳入提交范围。
+- 当前有效判断：
+  - `./scripts/mvnw-local.sh -q -DskipTests compile` 已通过。
+  - `./scripts/mvnw-local.sh -q -DskipITs test` 已通过。
+  - `cd frontend && npm test -- --run` 与 `cd frontend && npm run build` 已通过。
+  - `./scripts/run-live-smoke.sh` 仍未形成 Anthropic / Gemini 的 non-skipped 验收证据。
+  - reviewer 按当前文档边界复核后，未发现新的阶段外扩张、分层回退或离线可复现回归。
+  - 当前工作区仍有大量在途实现改动；在真实 Provider 验收闭环前，本轮不对这些改动作阶段收口判断。
 
 ## 当前阻塞
 
@@ -34,14 +31,15 @@
 
 ## 当前主线
 
-1. 当前主线只做阶段 A 验收收敛，不新增实现范围；`2026-04-05` 开发侧复核未发现新的阶段 A 代码级首要缺口，先解除环境阻塞。
-2. 执行顺序固定为：
+1. 当前主线只做阶段 A 验收收敛，不新增实现范围；`2026-04-05` 开发侧复核未发现新的阶段 A 代码级首要缺口，先解除真实 Provider 环境阻塞。
+2. 当前主线只保留一个有效 review 结论：离线编译、离线回归、前端单测与前端构建已通过，但测试覆盖仍缺 Anthropic / Gemini 真实 Provider non-skipped 证据。
+3. 执行顺序固定为：
    1. 补齐 Anthropic / Gemini 真实 Provider 配置。
    2. 复跑 `./scripts/run-live-smoke.sh`。
    3. 若仍失败，只处理脚本输出的首个失败点，且该修正必须仍落在阶段 A 边界内。
    4. 仅在 live smoke 全部 non-skipped 后，才进入阶段 A 收口判断与收口 commit。
-3. 在 live smoke 全部 non-skipped 前，不做阶段收口 commit，也不整理或混入当前工作区尚未验收的实现改动。
-4. 本轮协调输出只保留阶段状态、当前阻塞、当前主线和下一步入口，不把过程性说明继续累积到进度文档。
+4. 在 live smoke 全部 non-skipped 前，不做阶段收口 commit，也不整理或混入当前工作区尚未验收的实现改动。
+5. 本轮协调输出只保留阶段状态、当前阻塞、当前主线和下一步入口，不把过程性说明继续累积到进度文档。
 
 ## 下一步入口
 
