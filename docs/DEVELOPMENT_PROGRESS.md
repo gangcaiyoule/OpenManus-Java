@@ -3,26 +3,26 @@
 ## 当前阶段状态
 
 - 日期：**2026-04-06**
-- 阶段：**上下文治理阶段 B 第一切片复验与收口**
-- 状态：**Ready**
-- commit 判断：**执行文档协调 commit；暂不执行阶段收口 commit**
+- 阶段：**当前阶段收口复验**
+- 状态：**Blocked**
+- commit 判断：**暂不建议按收口结论提交**
 - 阶段边界：只收口“单 Agent + 上下文治理 A + CodeAct A + 工具结果摘要化 / 卸载索引 / 按需回填”。
-- 当前结论：当前工作树复验中 `./scripts/mvnw-local.sh -q -DskipTests compile`、`./scripts/mvnw-local.sh -q -DskipITs test`、`./scripts/run-live-smoke.sh` 均通过；当前阶段已具备收口基线，但工作树仍包含大量未拆分的实现态增量，不能直接把“当前工作树”整体视为本阶段可提交产物。
+- 当前验收口径：仍以 `compile + test + live smoke` 同时通过作为完成判断。
+- 当前结论：`./scripts/mvnw-local.sh -q -DskipTests compile` 与 `./scripts/mvnw-local.sh -q -DskipITs test` 已通过，但 `./scripts/run-live-smoke.sh` 当前输出为 `tests=1, failures=1, errors=0, skipped=0`；当前阶段尚未满足既定验收条件。
 
 ## 当前阻塞
 
-- 当前没有代码级或验证级阻塞。
-- 当前阻塞只在提交层面：工作树存在大量与“本阶段收口”混合的实现改动，尚未按阶段主线拆分，不能直接执行阶段收口 commit。
+- 当前工作树仍包含大量未提交改动，后续提交前仍需按当前阶段边界复核变更集合，避免把不属于本阶段的内容一并带入。
+- 当前 OpenAI-compatible `live smoke` 环境不可用，需先修复 token / provider 侧访问条件，再判断是否存在主链路兼容问题。
 
 ## 当前主线
 
-1. 守住“单 Agent + 上下文治理 A + CodeAct A + 工具结果摘要化 / 卸载索引 / 按需回填”边界，不进入上下文治理阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
-2. 以 `compile + test + live smoke` 作为当前唯一有效回归基线，后续判断都以这组三项结果为准。
-3. 继续按 `domain / agent / infra / aiframework` 分层推进；如出现回归，只允许在对应边界内做最小修正，不把兼容逻辑扩散到 Controller 或配置层。
-4. 当前提交策略只做文档协调与收口判断，不把未拆分实现态改动混入本次 commit。
+- 继续守住“单 Agent + 上下文治理 A + CodeAct A + 工具结果摘要化 / 卸载索引 / 按需回填”边界，不进入上下文治理阶段 C、MCP 资源融合或 `Multi-Agent` 默认实现面。
+- 当前只接受 `compile + test + live smoke` 同时通过后的收口判断；在 `live smoke` 恢复绿色前，不把当前阶段标记为 `Ready`。
+- 如环境恢复后仍失败，只允许沿 `aiframework transport/client/parser` 边界做最小修正，不把兼容逻辑扩散到 `domain`、Controller 或配置层。
 
 ## 下一步入口
 
-1. 先以本次复验结果为基线，拆分当前工作树中属于本阶段主线的实现改动与非主线增量。
-2. 拆分完成前，只允许继续做文档收敛、边界核对和最小必要修正，不启动下一阶段能力开发。
-3. 待形成独立、单一主线的小步改动集后，再执行阶段收口 commit。
+1. 先修复 OpenAI-compatible 验收环境中的 token / provider 访问条件。
+2. 重新执行 `./scripts/run-live-smoke.sh`，确认是否恢复到 `failures=0, errors=0, skipped=0`。
+3. 只有在 `live smoke` 变绿且变更集合按阶段边界收敛后，才重新判断是否执行当前阶段 commit。

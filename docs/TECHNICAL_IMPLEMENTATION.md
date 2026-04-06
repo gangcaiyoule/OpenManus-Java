@@ -55,7 +55,7 @@
 - `ContextAssembler` 按固定顺序组装模型输入：先历史、再当前轮、最后做总量裁剪。
 - 当 `ContextSnapshot` 没有 `fullMessages` 但已经携带当前轮消息时，`ContextAssembler` 仍以当前轮消息作为最小组装输入，不丢失当前用户消息后的工具观察。
 - `ToolResultContextCompressor` 对超长工具结果生成固定压缩卡片，只保留 `keyFacts`、`recentActions`、`todo`、`artifactId` 与必要预览。
-- `IndexedRehydrateSelector` 只在显式 `artifactId`、工具名或压缩卡片摘要命中时选择 artifact 回填。
+- `IndexedRehydrateSelector` 只在显式 `artifactId`、工具名或压缩卡片摘要命中时选择 artifact 回填；其中压缩卡片摘要命中只允许命中对应 `artifactId`，不把同工具的其他 artifact 一起放入候选。
 - `TaskExecutionState` 只保留单次执行回路所需的最小任务态卡片，不展开到阶段 C 的结构化任务系统。
 
 ### 3.2 CodeAct 最小闭环
@@ -81,6 +81,8 @@
 - `SessionSandboxInfo` 只保留 `sessionId`、`vncUrl`、`createdAt` 与 `status` 等会话级快照；容器 ID、端口等运行时标识只允许保留在 `infra/sandbox` 私有句柄中。
 - `SessionSandboxManager` 的注释、日志和对外表述统一收敛为“会话级沙箱编排”语义，不在 `domain` 层暴露容器/VNC 运行时实现细节。
 - `/api/proxy/web` 只接受 base64url 目标地址；代理仅允许显式 `http/https` 绝对 URL，并拒绝回环、本地和链路本地地址。
+- `/api/proxy/web` 与 `/api/proxy/url` 通过独立配置 `openmanus.web-proxy.enabled` 控制装配，默认关闭；只有显式开启时才暴露入口。
+- Web 代理跨域访问只允许 `openmanus.web-proxy.allowed-origins` 中的显式 origin；白名单为空时不开放跨域访问，不再使用 `@CrossOrigin("*")`。
 
 ## 4. 验证口径
 
@@ -91,19 +93,21 @@
 - `AgentService` / `WorkflowStreamService` 主流程、分支、异常和边界。
 - 工作流监控事件收口与 listener 生命周期。
 - Web 代理输入校验、重定向校验和异常响应头过滤。
+- Web 代理开关关闭、显式 origin 白名单开启与空白名单不开放跨域访问。
 - 沙箱生命周期与状态探测边界。
 - 配置回退、`.env` 回填和 live smoke 脚本一致性。
 - 架构守卫，确保 `domain -> port -> infra adapter` 分层不回退。
 
-`2026-04-06` 当前复验结果：
+`2026-04-06` 本轮复验结果：
 
 - `./scripts/mvnw-local.sh -q -DskipTests compile` 通过。
 - `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
-- `./scripts/run-live-smoke.sh` 通过，结果为 `tests=1, failures=0, errors=0, skipped=0`。
+- `./scripts/run-live-smoke.sh` 失败；当前输出为 `tests=1, failures=1, errors=0, skipped=0`，失败项为 OpenAI-compatible 主链路 `401` `无效的令牌`。
 
 当前已落地且仍有效的验证点：
 
 - `ContextSnapshotTest`、`ContextBudgetPolicyTest`、`ContextAssemblerTest`、`ToolResultContextCompressorTest`、`IndexedRehydrateSelectorTest`、`AbstractAgentExecutorChatMemoryIntegrationTest` 覆盖上下文治理主流程、分支、异常和边界；其中 `ContextAssemblerTest` 额外覆盖“无 `fullMessages` 但已有当前轮消息”时不丢当前轮工具观察的边界。
+- `IndexedRehydrateSelectorTest` 额外覆盖“压缩卡片摘要命中后只回填对应 artifact、不扩散到同工具其他 artifact”的边界，避免 indexed rehydrate 在同工具多 artifact 场景下误注入无关结果。
 - `TaskExecutionStateTest`、`TaskExecutionStateTrackerTest`、`TaskStateContextInjectorTest` 覆盖最小任务态卡片的预算、状态迁移和注入边界。
 - `HttpTransportTest`、`SseTransportTest`、`OpenAiClientIntegrationTest`、`OpenAiResponseParserTest` 覆盖 OpenAI-compatible 同步/流式路径、SSE 聚合、错误 payload、retry 分支，以及“200 + SSE error payload”不被误包装成解析失败的异常透传路径。
 - `HttpTransportTest` 与 `SseTransportTest` 额外覆盖 `530` 等瞬时 `5xx` 上游错误的短退避重试分支，确保 OpenAI-compatible 主链路与 live smoke 对网关抖动的收口一致。
@@ -114,9 +118,10 @@
 - `OpenManusPropertiesEnvFallbackTest`、`McpRuntimeConfigWiringTest`、`Step2UnifiedAgentConfigRuntimeBehaviorTest`、`McpToolRegistryBootstrapTest` 额外覆盖 MCP resource-read 独立开关的默认关闭、显式开启、缓存边界和主链路装配分支。
 - `LiveSmokeEnvTest` 与 `LiveSmokeScriptIntegrationTest` 已覆盖 `.env` 解析、default-llm fallback、legacy OpenAI fallback、候选模型回退、可选 provider 装配，以及脚本到 Maven/Surefire 进程的环境变量透传。
 - `SessionSandboxManagerLifecycleTest`、`SessionSandboxManagerSecurityTest`、`SessionSandboxClientAdapterTest`、`AgentControllerSessionInfoTest` 与 `SingleAgentArchitectureGuardTest` 已覆盖沙箱会话级编排、状态刷新、销毁异常、文件沙箱委托、前端查询响应，以及 `domain` 不再暴露容器 ID/端口或回写容器/VNC 语义的边界守卫。
+- `WebProxyControllerTest`、`WebProxyControllerConditionTest`、`WebProxyServiceTest`、`WebMvcConfigTest` 与 `OpenManusPropertiesEnvFallbackTest` 已覆盖 Web 代理主流程、base64url 入参校验、异常映射、条件装配、开关关闭、显式 origin 白名单、空白名单不开放跨域，以及系统属性回填边界。
 
 ## 5. 当前收口判断
 
 - 当前工作树仍维持既定阶段边界：单 Agent、上下文治理阶段 A、CodeAct 阶段 A，以及“工具结果摘要化 / 卸载索引 / 按需回填”最小链路，没有扩展到上下文治理阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
-- 当前代码与 `compile + test + live smoke` 基线满足阶段主线约束，可以进入收口与提交判断；但提交仍应遵守 `AGENTS.md` 的“小步推进、逐步完成”，先拆分当前工作树中的混合增量，再执行阶段收口提交。
-- 当前处理原则仍是守住现有 `domain / agent / infra / aiframework` 边界；只有出现回归时，才允许在 `aiframework transport/client/parser`、`agent` 上下文治理或对应 `infra adapter` 边界做最小修正，不向 `domain`、Controller 或配置层扩散兼容逻辑。
+- 当前阶段验收条件尚未满足：`compile + test` 已通过，但 `live smoke` 仍阻塞，当前不能按“阶段已收口”推进。
+- 当前处理原则仍是守住现有 `domain / agent / infra / aiframework` 边界；后续只在环境恢复后仍出现主链路失败时，才允许在 `aiframework transport/client/parser`、`agent` 上下文治理或对应 `infra adapter` 边界做最小修正，不向 `domain`、Controller 或配置层扩散兼容逻辑。
