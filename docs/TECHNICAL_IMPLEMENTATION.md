@@ -6,7 +6,7 @@
 
 1. 上下文治理阶段 A。
 2. CodeAct 阶段 A。
-3. 上下文治理阶段 B 第一切片：最小工具结果摘要化、卸载索引与按需回填。
+3. 上下文治理阶段 B 第一切片：工具结果摘要化、卸载索引与按需回填。
 
 当前不进入：
 
@@ -17,13 +17,16 @@
 当前阶段完成标准：
 
 1. 单 Agent 最小链路稳定。
-2. `./scripts/run-live-smoke.sh` 在当前默认 provider 路径上产出 non-skipped 结果。
+2. `./scripts/mvnw-local.sh -q -DskipTests compile` 通过。
+3. `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
+4. `./scripts/run-live-smoke.sh` 产出 non-skipped 成功结果。
 
 当前阶段 provider 口径：
 
 - 默认验收只看 OpenAI-compatible 主链路。
-- Anthropic / Gemini 只保留配置兼容、接入点和测试预留，不作为阶段 A 收口前置条件。
-- 在未重新提升阶段目标前，不为补齐 Anthropic / Gemini live smoke 扩张当前阶段范围。
+- Anthropic / Gemini 只保留配置兼容、接入点和测试预留，不作为本阶段收口前置条件。
+- OpenAI-compatible live smoke 只在“未显式提供任何模型/候选模型”时回退到内置候选：`gpt-5.4`、`gpt-5`、`gpt-4o`；一旦已提供 `OPENMANUS_LIVE_MODEL[/CANDIDATES]`、`OPENMANUS_LLM_DEFAULT_LLM_MODEL[/CANDIDATES]` 或 `OPENAI_MODEL[/CANDIDATES]`，就只试显式配置的候选，不再追加内置噪音模型。
+- OpenAI-compatible `HttpTransport` 与 `SseTransport` 在 `429`、`5xx` 与 vendor-wrapped `bad_response_status_code` 分支统一做短退避后重试；live smoke 端到端校验在单模型内额外保留有限次重试，只用于吸收网关瞬时抖动，不改变主链路协议口径。
 
 ## 2. 当前有效分层
 
@@ -39,62 +42,46 @@
 - `WorkflowStreamService` 只依赖 `WorkflowExecutionEventPort` 与 `WorkflowStreamPublisher`。
 - `SessionSandboxManager` 只做会话级编排，运行时沙箱细节下沉到 `infra/sandbox`。
 - `WebProxyController` 与 `WebProxyService` 只依赖 `WebProxyFetchPort`；URL 校验、请求转发、重定向复检和响应头过滤下沉到 `infra/web`。
-- MCP 工具接入继续受 `openmanus.mcp.enabled=true` 保护，阶段 A 默认主链路不自动装入 MCP 工具。
+- MCP 工具接入继续受 `openmanus.mcp.enabled=true` 保护，但当前阶段只允许“工具发现 + 工具调用协议转换”进入主链路。
+- `mcp.resource.read` 不属于当前阶段默认主链路；它通过独立开关 `openmanus.mcp.resource-read-enabled` 控制，默认关闭，不再与 `openmanus.mcp.enabled` 共用同一默认入口。
+- `McpToolRegistryBootstrap` 的便捷构造默认值已与运行时入口对齐；只有显式开启时才注册 `mcp.resource.read`。
 
 ## 3. 当前最小可运行链路
 
 ### 3.1 上下文治理
 
-- `ContextSnapshot` 统一提取历史消息、当前轮消息和当前用户输入。
-- `ContextSnapshot` 先按对象身份定位当前用户消息；命不中时再按等值消息从后向前回退，避免消息重建后把当前轮误拆到历史区。
-- `ContextBudgetPolicy` 统一消息数和 token 预算。
-- `ContextAssembler` 按固定顺序组装并裁剪上下文。
-- `ToolResultContextCompressor` 对超长工具结果做最小压缩。
-- `ToolResultContextCompressor` 输出固定摘要卡片，只保留 `keyFacts`、`recentActions`、`todo` 与必要预览。
-- `ToolResultContextCompressor` 会继续收缩摘要字段与预览片段，确保压缩卡片自身仍受配置字符预算约束。
-- `IndexedRehydrateSelector` 负责按需回填选择，不把回填决策扩散到 `domain`、Controller 或配置层。
-- `TaskExecutionState` 只保留最小任务态卡片。
-
-当前顺序固定为：
-
-1. 先裁剪历史消息。
-2. 再合并当前轮消息。
-3. 最后执行总量与 token 预算控制。
+- `ContextSnapshot` 统一拆分历史消息、当前轮消息和当前用户输入。
+- `ContextBudgetPolicy` 统一消息数与总量预算。
+- `ContextAssembler` 按固定顺序组装模型输入：先历史、再当前轮、最后做总量裁剪。
+- `ToolResultContextCompressor` 对超长工具结果生成固定压缩卡片，只保留 `keyFacts`、`recentActions`、`todo`、`artifactId` 与必要预览。
+- `IndexedRehydrateSelector` 只在显式 `artifactId`、工具名或压缩卡片摘要命中时选择 artifact 回填。
+- `TaskExecutionState` 只保留单次执行回路所需的最小任务态卡片，不展开到阶段 C 的结构化任务系统。
 
 ### 3.2 CodeAct 最小闭环
 
-- `AbstractAgentExecutor` 负责单轮执行循环和工具调用编排。
+- `AbstractAgentExecutor` 负责“计划 -> 执行工具 -> 观察结果 -> 调整计划”的单轮循环。
 - 本地工具继续通过统一工具注册机制接入。
-- 工具结果统一写回对话上下文；超长结果优先走“摘要/卸载卡片 + artifact”路径，供下一轮观察与调整。
-- MCP 代码只保留最小接入点，不进入默认执行面。
+- 工具结果统一写回对话上下文；超长结果优先走“摘要卡片 + artifact”路径。
+- MCP 代码只保留最小接入点；资源读取能力仅在 `openmanus.mcp.resource-read-enabled=true` 时进入验证链路，默认不进入当前阶段执行面。
+- OpenAI-compatible client 对 SSE 结果统一走同一完成态校验：若只有 `usage`、没有文本、工具调用和 `finishReason`，同步与流式都按空响应失败收口。
+- OpenAI-compatible live smoke 对单模型仍保留有限次重试，但 `model_not_found` / `No available channel for model` 这类确定性配置错误不再在同一候选上盲重试，直接切到下一个候选或收口失败。
 
 ### 3.3 工具结果摘要化、卸载与回填
 
 - 超长工具结果可落到 `AiToolResultArtifactStore`，chat memory 中只保留 `[Tool Result Offloaded]` 索引卡片。
 - `ContextAssembler` 在模型输入侧会把超长原始工具结果压缩成 `[Tool Result Context Compressed]` 卡片。
-- 压缩卡片只保留三类摘要信号：`keyFacts`、`recentActions`、`todo`，以及必要的 `artifactId` / 预览信息。
-- `IndexedRehydrateSelector` 只在以下条件之一成立时选择 artifact：
-  1. 当前用户消息显式包含合法 `artifactId`。
-  2. 当前用户消息明确提及有效工具名。
-  3. 当前用户消息命中压缩卡片摘要中的关键事实、最近动作或待办。
-- 仅因模型上下文里存在压缩卡片本身，不构成隐式回填信号，避免无关问题把旧 artifact 重新灌回模型。
 - 回填结果统一以 `TOOL` 观察消息注入，并继续受单条字符上限、单轮数量上限和总量预算约束。
 
 ### 3.4 监控、沙箱与代理收口
 
 - `/api/agent/chat` 与 `/workflow-stream` 都必须产出最小 workflow tracking 和 execution 终态。
 - 异常统一解包到根因，空白异常文案统一归一为 `unknown error`。
-- `SessionSandboxManager.getSandboxInfo()` 只在缓存为 `RUNNING` 且 `containerId` 非空时探测运行态。
-- 运行态探测失败时保留最后一次缓存状态，避免会话查询路径因瞬时探测异常直接失败。
+- `SessionSandboxManager` 只缓存会话级 `SessionSandboxInfo` 快照；运行态探测、停止态刷新和按 `containerId` 销毁全部下沉到 `infra/sandbox/SessionSandboxClientAdapter`。
+- `SessionSandboxInfo` 只保留 `sessionId`、`vncUrl`、`createdAt` 与 `status` 等会话级快照；容器 ID、端口等运行时标识只允许保留在 `infra/sandbox` 私有句柄中。
+- `SessionSandboxManager` 的注释、日志和对外表述统一收敛为“会话级沙箱编排”语义，不在 `domain` 层暴露容器/VNC 运行时实现细节。
 - `/api/proxy/web` 只接受 base64url 目标地址；代理仅允许显式 `http/https` 绝对 URL，并拒绝回环、本地和链路本地地址。
 
 ## 4. 验证口径
-
-当前有效验证入口：
-
-- `./scripts/mvnw-local.sh -q -DskipTests compile`
-- `./scripts/mvnw-local.sh -q -DskipITs test`
-- `./scripts/run-live-smoke.sh`
 
 当前必须守住的覆盖面：
 
@@ -107,42 +94,28 @@
 - 配置回退、`.env` 回填和 live smoke 脚本一致性。
 - 架构守卫，确保 `domain -> port -> infra adapter` 分层不回退。
 
-当前已落地并通过的直接验证包括：
-
-- `LiveSmokeEnvTest`：覆盖 OpenAI、Anthropic、Gemini 的显式 live env、provider/default fallback、空白值和 placeholder key 分支。
-- `LiveSmokeScriptIntegrationTest`：覆盖 `run-live-smoke.sh` 的 `.env` 解析、OpenAI 必填、Anthropic/Gemini 可选启用、default/legacy OpenAI fallback、provider profile 回填、缺参/半配/placeholder fail-fast 和脚本结果汇总口径。
-- `ValidationScriptsConsistencyTest`：约束 `dotenv.example` 与 live smoke 脚本所需变量保持一致。
-
 `2026-04-06` 当前复验结果：
 
-- `./scripts/mvnw-local.sh -q -DskipTests compile` 在当前工作树通过。
-- `./scripts/mvnw-local.sh -q -DskipITs test` 在当前工作树通过。
-- `./scripts/mvnw-local.sh -q -DskipITs -Dtest=ToolResultContextCompressorTest,ContextAssemblerTest,IndexedRehydrateSelectorTest,AbstractAgentExecutorChatMemoryIntegrationTest test` 在当前工作树通过。
-- `./scripts/mvnw-local.sh -q -DskipITs -Dtest=HttpTransportTest,SseTransportTest,OpenAiClientIntegrationTest,OpenAiResponseParserTest test` 在当前工作树通过。
-- `./scripts/mvnw-local.sh -q -DskipITs -Dtest=HttpTransportTest,SseTransportTest,OpenAiClientIntegrationTest,OpenAiResponseParserTest,ToolResultContextCompressorTest,ContextAssemblerTest,IndexedRehydrateSelectorTest,AbstractAgentExecutorChatMemoryIntegrationTest test` 在当前工作树通过。
-- `./scripts/run-live-smoke.sh` 在 `2026-04-06` 当前环境复跑产出 `tests=1, failures=0, errors=1, skipped=0`；当前首个错误为 `OpenAiClientLiveSmokeTest` 的同步 `chat()` 收到 `503`，provider 返回 `{"error":{"message":"没有可用的账号","type":"server_error","param":"","code":null}}`。
-- `LiveSmokeEnv` 与 `run-live-smoke.sh` 现在会把 `OPENAI_MODEL`、`OPENAI_BASE_URL`、`OPENAI_API_KEY` 作为 OpenAI-compatible live smoke 的最后一级兼容回退，与运行时 `OpenManusProperties` 的现有环境映射保持一致，避免“应用可跑但 live smoke 因口径不一致被跳过”。
-- `OpenAiResponseParser` 与 `AbstractAiProviderClient` 当前已补齐两条防呆：JSON `error` payload 直接抛框架异常；同步 `chat()` 收到只有 usage、没有内容/工具/finish reason 的 SSE 成功体时显式判失败，避免把 provider 异常误落成空白答案。
-- `HttpTransport` 现在会把 `2xx` 且以 `data:` / `event:` 开头的 SSE 正文包装为 transport 侧事件集合；`AbstractAiProviderClient.chat()` 复用现有 `parseStreamChunk()` 聚合 delta、finish reason、tool call 与 usage，兼容 OpenAI-compatible 同步路径返回 SSE 正文的情况。
-- `HttpTransport` 与 `SseTransport` 当前已补齐一条最小 retry 兼容：当 provider 网关把上游临时故障包装成 `403 bad_response_status_code` 时，仍按可重试失败处理，不把瞬时上游状态直接固化为最终错误。
-- `HttpTransportTest` 与 `SseTransportTest` 已补齐“vendor-wrapped upstream failure -> retry -> succeed”分支。
-- OpenAI-compatible JSON `error` payload 与“只有 usage、没有内容/工具/finish reason 的空 SSE 成功体”现在会在 `aiframework client/parser` 边界被显式判失败。`2026-04-06` 当日实际抓到的同步 `chat()` `2xx` SSE 正文为“空 `choices` + `usage` + `[DONE]`”，没有任何文本 delta、tool call 或 finish reason，因此当前阻塞已收敛为外部 provider 未返回有效 completion，而不是仓库内遗漏了新的成功事件解析分支。
-- `HttpTransportTest` 已补齐“`2xx` 成功状态返回 SSE 正文”分支；`OpenAiClientIntegrationTest` 已补齐“同步 `chat()` 收到 SSE 正文时仍能聚合出完整响应”主流程。
-- `ContextSnapshotTest` 已覆盖“等值但非同一实例”的当前用户消息拆分，以及重复用户输入时优先命中最新一条。
-- `ContextBudgetPolicyTest` 与 `ContextAssemblerTest` 已补齐“detached current user + total limit”组合场景，固定总量裁剪时优先保留持久化当前用户锚点与最新工具结果。
-- `ToolResultContextCompressorTest` 已补齐“压缩卡片自身不得超过 `maxChars`”边界，验证摘要字段与预览片段会继续收缩直到预算内。
-- `IndexedRehydrateSelectorTest` 与 `AbstractAgentExecutorChatMemoryIntegrationTest` 已补齐“命中压缩卡片摘要触发回填”和“压缩卡片存在但无摘要命中时不回填”场景。
-- `WebProxyServiceTest`、`HttpUrlConnectionWebProxyAdapterTest` 与 `SingleAgentArchitectureGuardTest` 已复验 `WebProxy` 校验下沉到 `infra/web`，domain 侧只保留 port 编排与守卫约束。
-- `LiveSmokeScriptIntegrationTest` 与 `ValidationScriptsConsistencyTest` 已复验通过，`run-live-smoke.sh` 现已收敛为 OpenAI-compatible 必需、Anthropic / Gemini 按配置可选启用。
-- Anthropic / Gemini 仍只保留配置兼容、接入点和测试预留，不作为当前阶段默认验收前置条件。
+- `./scripts/mvnw-local.sh -q -DskipTests compile` 通过。
+- `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
+- `./scripts/run-live-smoke.sh` 通过，结果为 `tests=1, failures=0, errors=0, skipped=0`。
 
-## 5. 当前阻塞与处理原则
+当前已落地且仍有效的验证点：
 
-当前切片的唯一有效阻塞，是默认 OpenAI-compatible live smoke 仍未产出 non-skipped 成功结果。`2026-04-06` 当前环境最新复验里，`OpenAiClientLiveSmokeTest` 在同步 `chat()` 阶段直接收到 `503`，provider 返回 `没有可用的账号`，因此当前问题继续收敛为外部默认 provider 不可用。
+- `ContextSnapshotTest`、`ContextBudgetPolicyTest`、`ContextAssemblerTest`、`ToolResultContextCompressorTest`、`IndexedRehydrateSelectorTest`、`AbstractAgentExecutorChatMemoryIntegrationTest` 覆盖上下文治理主流程、分支、异常和边界。
+- `TaskExecutionStateTest`、`TaskExecutionStateTrackerTest`、`TaskStateContextInjectorTest` 覆盖最小任务态卡片的预算、状态迁移和注入边界。
+- `HttpTransportTest`、`SseTransportTest`、`OpenAiClientIntegrationTest`、`OpenAiResponseParserTest` 覆盖 OpenAI-compatible 同步/流式路径、SSE 聚合、错误 payload、retry 分支，以及“200 + SSE error payload”不被误包装成解析失败的异常透传路径。
+- `HttpTransportTest` 与 `SseTransportTest` 额外覆盖 `530` 等瞬时 `5xx` 上游错误的短退避重试分支，确保 OpenAI-compatible 主链路与 live smoke 对网关抖动的收口一致。
+- `OpenAiClientIntegrationTest` 额外覆盖 OpenAI-compatible 流式 `2xx + usage-only SSE` 空响应分支，确保 `streamChat()` 不会把空结果误报为成功完成。
+- `OpenAiClientLiveSmokeTestTest` 与 `LiveSmokeScriptIntegrationTest` 额外覆盖 OpenAI-compatible live smoke 在“env 未配置 -> skipped”“候选模型全部失败 -> failure”“单模型多次失败摘要”以及嵌套异常根因摘要几条收口路径，避免 provider 实际失败被误归类成 `skipped` 或被模糊失败文案掩盖。
+- `OpenAiClientLiveSmokeTestTest` 额外覆盖 `model_not_found` / `No available channel for model` 的非重试分支，以及 `empty SSE`、vendor-wrapped `bad_response_status_code` 仍可继续重试的分支，保证候选模型切换只在确定性配置错误上提前收口。
+- `LiveSmokeScriptIntegrationTest` 额外覆盖 `run-live-smoke.sh` 的首个 `failure/error/skipped` 明细提取、XML 转义解码和 CDATA 明细输出，保证 live smoke 阻塞可直接在终端收口。
+- `OpenManusPropertiesEnvFallbackTest`、`McpRuntimeConfigWiringTest`、`Step2UnifiedAgentConfigRuntimeBehaviorTest`、`McpToolRegistryBootstrapTest` 额外覆盖 MCP resource-read 独立开关的默认关闭、显式开启、缓存边界和主链路装配分支。
+- `LiveSmokeEnvTest` 与 `LiveSmokeScriptIntegrationTest` 已覆盖 `.env` 解析、default-llm fallback、legacy OpenAI fallback、候选模型回退、可选 provider 装配，以及脚本到 Maven/Surefire 进程的环境变量透传。
+- `SessionSandboxManagerLifecycleTest`、`SessionSandboxManagerSecurityTest`、`SessionSandboxClientAdapterTest`、`AgentControllerSessionInfoTest` 与 `SingleAgentArchitectureGuardTest` 已覆盖沙箱会话级编排、状态刷新、销毁异常、文件沙箱委托、前端查询响应，以及 `domain` 不再暴露容器 ID/端口或回写容器/VNC 语义的边界守卫。
 
-处理原则：
+## 5. 当前收口判断
 
-1. 当前只继续维持“阶段 B 第一切片”的已落地范围，不扩展到阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
-2. 维持 `WebProxy`、live smoke 脚本和当前分层边界，不把校验、传输或 provider 兼容逻辑回流到 `domain`。
-3. 默认验收继续以 OpenAI-compatible 主链路为准；在外部 provider 恢复前，不扩写新的 provider 兼容分支，也不把 `503 server_error / 没有可用的账号` 误判为仓库内主链路回退。
-4. 在 `compile`、`test` 与默认 live smoke 三项同时满足当前阶段口径前，不进行阶段完成判断，也不做新的阶段性 commit。
+- 当前工作树仍维持既定阶段边界：单 Agent、上下文治理阶段 A、CodeAct 阶段 A，以及“工具结果摘要化 / 卸载索引 / 按需回填”最小链路，没有扩展到上下文治理阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
+- 当前已满足阶段验收口径；后续重点转为按已通过基线拆分工作树，避免把后续切片或非主线内容混入本阶段收口。
+- 当前处理原则仍是守住现有 `domain / agent / infra / aiframework` 边界；只有出现回归时，才允许在 `aiframework transport/client/parser`、`agent` 上下文治理或对应 `infra adapter` 边界做最小修正，不向 `domain`、Controller 或配置层扩散兼容逻辑。
