@@ -53,6 +53,7 @@
 - `ContextSnapshot` 统一拆分历史消息、当前轮消息和当前用户输入。
 - `ContextBudgetPolicy` 统一消息数与总量预算。
 - `ContextAssembler` 按固定顺序组装模型输入：先历史、再当前轮、最后做总量裁剪。
+- 当 `ContextSnapshot` 没有 `fullMessages` 但已经携带当前轮消息时，`ContextAssembler` 仍以当前轮消息作为最小组装输入，不丢失当前用户消息后的工具观察。
 - `ToolResultContextCompressor` 对超长工具结果生成固定压缩卡片，只保留 `keyFacts`、`recentActions`、`todo`、`artifactId` 与必要预览。
 - `IndexedRehydrateSelector` 只在显式 `artifactId`、工具名或压缩卡片摘要命中时选择 artifact 回填。
 - `TaskExecutionState` 只保留单次执行回路所需的最小任务态卡片，不展开到阶段 C 的结构化任务系统。
@@ -102,7 +103,7 @@
 
 当前已落地且仍有效的验证点：
 
-- `ContextSnapshotTest`、`ContextBudgetPolicyTest`、`ContextAssemblerTest`、`ToolResultContextCompressorTest`、`IndexedRehydrateSelectorTest`、`AbstractAgentExecutorChatMemoryIntegrationTest` 覆盖上下文治理主流程、分支、异常和边界。
+- `ContextSnapshotTest`、`ContextBudgetPolicyTest`、`ContextAssemblerTest`、`ToolResultContextCompressorTest`、`IndexedRehydrateSelectorTest`、`AbstractAgentExecutorChatMemoryIntegrationTest` 覆盖上下文治理主流程、分支、异常和边界；其中 `ContextAssemblerTest` 额外覆盖“无 `fullMessages` 但已有当前轮消息”时不丢当前轮工具观察的边界。
 - `TaskExecutionStateTest`、`TaskExecutionStateTrackerTest`、`TaskStateContextInjectorTest` 覆盖最小任务态卡片的预算、状态迁移和注入边界。
 - `HttpTransportTest`、`SseTransportTest`、`OpenAiClientIntegrationTest`、`OpenAiResponseParserTest` 覆盖 OpenAI-compatible 同步/流式路径、SSE 聚合、错误 payload、retry 分支，以及“200 + SSE error payload”不被误包装成解析失败的异常透传路径。
 - `HttpTransportTest` 与 `SseTransportTest` 额外覆盖 `530` 等瞬时 `5xx` 上游错误的短退避重试分支，确保 OpenAI-compatible 主链路与 live smoke 对网关抖动的收口一致。
@@ -117,5 +118,5 @@
 ## 5. 当前收口判断
 
 - 当前工作树仍维持既定阶段边界：单 Agent、上下文治理阶段 A、CodeAct 阶段 A，以及“工具结果摘要化 / 卸载索引 / 按需回填”最小链路，没有扩展到上下文治理阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
-- 当前已满足阶段验收口径；后续重点转为按已通过基线拆分工作树，避免把后续切片或非主线内容混入本阶段收口。
+- 当前代码与 `compile + test + live smoke` 基线满足阶段主线约束，可以进入收口与提交判断；但提交仍应遵守 `AGENTS.md` 的“小步推进、逐步完成”，先拆分当前工作树中的混合增量，再执行阶段收口提交。
 - 当前处理原则仍是守住现有 `domain / agent / infra / aiframework` 边界；只有出现回归时，才允许在 `aiframework transport/client/parser`、`agent` 上下文治理或对应 `infra adapter` 边界做最小修正，不向 `domain`、Controller 或配置层扩散兼容逻辑。
