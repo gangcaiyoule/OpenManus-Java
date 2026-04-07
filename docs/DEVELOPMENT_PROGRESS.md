@@ -10,11 +10,11 @@
 
 ## 当前阻塞
 
-- `2026-04-07 17:04 CST` 复验 `./scripts/mvnw-local.sh -q -DskipTests compile` 通过，`2026-04-07 17:05 CST` 复验 `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
+- `2026-04-07 17:12 CST` 复验 `./scripts/mvnw-local.sh -q -DskipTests compile` 通过，`2026-04-07 17:13 CST` 复验 `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
 - 当前外部 `live smoke` 实际命中配置为：
   `models=gpt-5.4, baseUrl=https://ruoli.dev/v1, apiKey=len=51,suffix=nLy0`
 - 当前失败已收敛为确定性鉴权错误：
-  `2026-04-07 17:05 CST` 运行 `./scripts/run-live-smoke.sh` 返回 `status=401`，错误摘要 `无效的令牌`，`request id=202604070905147409064708268d9d6eJhGVdBU`
+  `2026-04-07 17:13 CST` 运行 `./scripts/run-live-smoke.sh` 返回 `status=401`，错误摘要 `无效的令牌`，`request id=202604070913392819283308268d9d6OFpjdkLs`
 - 因此当前阻塞不是仓内代码回归、分层越界、默认执行面扩张或 `-DskipITs test` 测试失败。
 
 ## 当前主线
@@ -27,6 +27,6 @@
 
 ## 下一步入口
 
-1. 核对 `https://ruoli.dev/v1` 是否提供 `gpt-5.4`，并确认当前 `api key` 与该渠道匹配且仍有效。
-2. 仅在外部渠道、模型或凭证层修正配置后，重跑 `./scripts/run-live-smoke.sh`。
-3. 若鉴权修正后仍失败，再依据新的状态码、错误摘要和 `request id`，只在 `aiframework transport/client/parser` 边界内做最小排查。
+1. 先确认 `https://ruoli.dev/v1` 是否仍为当前可用 OpenAI-compatible 渠道，并核对其支持模型是否包含 `gpt-5.4`。
+2. 确认当前 `api key` 与该 `base URL` 属于同一渠道且未失效，再仅重跑 `./scripts/run-live-smoke.sh`。
+3. 若更换为确认有效的渠道、模型和凭证后仍失败，再依据新的状态码和 `request id`，只在 `aiframework transport/client/parser` 范围内做最小兼容排查。
