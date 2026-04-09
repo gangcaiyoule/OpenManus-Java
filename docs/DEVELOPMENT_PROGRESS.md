@@ -5,24 +5,27 @@
 - 日期：**2026-04-09**
 - 阶段：**单 Agent 最小链路验收收口**
 - 状态：**In Progress**
-- 阶段边界：只收口“单 Agent + 上下文治理阶段 A + CodeAct 阶段 A + 工具结果摘要化 / 卸载索引 / 按需回填”的最小链路；不进入上下文治理阶段 B 后续切片 / C、MCP 资源融合或 `Multi-Agent` 默认实现面。
-- 当前结论：仓内 `compile`、默认 `test` 与 `LiveSmokeScriptIntegrationTest` 已通过，当前没有新的仓内实现缺口；阶段是否完成只取决于 live smoke 外部验收是否闭口。
+- 当前阶段边界：只维护“单 Agent + 上下文治理阶段 A + CodeAct 阶段 A + 工具结果摘要化 / 卸载索引 / 按需回填 + MCP 工具发现/调用桥接”的最小责任面。
+- 当前阶段结论：代码主链路、分层边界和默认测试已经重新收口；`mcp.resource.read` 已退出默认配置、装配与阶段验收面，但阶段验收还没有完全闭环。
 
 ## 当前阻塞
 
-- `./scripts/run-live-smoke.sh` 当前继续从仓库根 `.env` 回填默认 live smoke 配置。
-- 当前失败稳定收敛为 `https://api.weclawai.cc/v1` 的 TLS 证书链问题：`PKIX path building failed` / `unable to find valid certification path to requested target`。
-- 在提供匹配的 `OPENMANUS_LIVE_CA_CERT_FILE`，或切换到 JVM 默认可信且与当前模型、凭证同源可用的兼容网关前，当前阶段不能判定为完成。
+- `./scripts/run-live-smoke.sh` 的 non-skipped 成功证据仍未产出，当前阶段还不能按“已完成”收口。
+- 本地默认验证入口对 JDK 版本不自洽；若 `JAVA_HOME` 指向 Java 17，`./scripts/mvnw-local.sh` 仍会被 Enforcer 拦截。
+- `aiframework` 内部仍保留 `mcp.resource.read` 预埋实现和测试，虽然不在默认装配面，但仍扩大了当前阶段维护面。
 
 ## 当前主线
 
-1. 停止继续堆叠与当前阶段无关的实现改动，当前主线只保留单 Agent 阶段验收闭环。
-2. 第一顺位处理 live smoke 外部验收，优先补当前网关可用的 PEM 证书链并复验。
-3. 若当前网关无法提供可用证书链，立即切换到证书链完整、与现有 `apiKey` 和模型同源可用的兼容网关后再复验。
-4. 只有在 live smoke 转绿后，才回到阶段完成判断、文档最终收口和阶段提交。
+1. 不扩阶段，只围绕单 Agent 阶段验收闭环推进。
+2. 先解决“验证入口是否可直接复现”的问题，再补 live smoke 外部验收证据。
+3. 在阶段验收没有闭环前，不进入 `Multi-Agent`、MCP 资源融合或上下文治理阶段 B/C 的新实现。
+4. 若 MCP resource-read 不会立刻进入下一阶段，就继续从 `aiframework` 内部收缩对应预埋复杂度；若暂时保留，只按阶段外预研能力处理。
 
 ## 下一步入口
 
-- 入口 1：准备当前网关可用的 PEM 证书链，并通过 `OPENMANUS_LIVE_CA_CERT_FILE=<pem> ./scripts/run-live-smoke.sh` 复验。
-- 入口 2：若无法提供匹配证书链，则切换到证书链完整且与当前 `apiKey`、模型同源可用的兼容网关后再复验。
-- 入口 3：若继续沿用当前 `.env` 的默认 LLM 配置，需同步确认 `baseUrl`、模型与凭证归属一致，避免 TLS 问题解决后再暴露 `401` 或 `model_not_found` 环境错误。
+1. 第一优先级：收口 Maven 验证入口。
+   入口标准：`./scripts/mvnw-local.sh -q -DskipTests compile` 与 `./scripts/mvnw-local.sh -q -DskipITs test` 在默认本地环境可直接复现，或文档统一改成显式要求 Java 21。
+2. 第二优先级：在环境满足时补跑 `./scripts/run-live-smoke.sh`。
+   入口标准：拿到 non-skipped 成功证据；若环境仍不满足，则继续维持阶段 `In Progress`，不提前宣告完成。
+3. 第三优先级：决定 `mcp.resource.read` 的当前阶段处理方式。
+   入口标准：要么继续删除 `aiframework` 内部预埋分支和对应测试，要么在文档中明确其不属于当前阶段默认维护基线。
