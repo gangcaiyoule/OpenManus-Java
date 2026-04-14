@@ -6,21 +6,20 @@
 - 阶段：**单 Agent 最小链路验收收口**
 - 状态：**In Progress**
 - 当前阶段边界：只维护“单 Agent + 上下文治理阶段 A + CodeAct 阶段 A + 工具结果摘要化 / 卸载索引 / 按需回填 + MCP 工具发现/调用桥接”的最小责任面。
-- 当前阶段结论：本轮 review 已实际复验 `./scripts/mvnw-local.sh -q -DskipTests compile`、`./scripts/mvnw-local.sh -q -DskipITs test`、`./scripts/run-live-smoke.sh`。仓内主链路、分层边界和默认验证入口继续维持收口；当前唯一未完成项仍是 live smoke 结果为 `tests=1, failures=0, errors=0, skipped=1`，首个有效阻塞仍是外部兼容网关证书链校验失败 `PKIX path building failed`。阶段未完成。
+- 当前阶段结论：本次复验中，`./scripts/mvnw-local.sh -q -DskipTests compile` 与 `./scripts/mvnw-local.sh -q -DskipITs test` 通过；`./scripts/run-live-smoke.sh` 仍返回 `tests=1, failures=0, errors=0, skipped=1`，首个有效阻塞仍是外部兼容网关证书链校验失败 `PKIX path building failed`。阶段未完成。
 
 ## 当前阻塞
 
-- 外部验收环境仍不可闭环。当前首个有效阻塞是兼容网关证书链校验失败 `PKIX path building failed`，因此 live smoke 仍停留在 assumption skip，未进入 non-skipped 成功验收。
+- 外部验收环境仍不可闭环。当前首个有效阻塞是兼容网关 TLS 证书链不被当前 JVM 信任，因此 live smoke 仍停留在 assumption skip，未进入 non-skipped 成功验收。
 
 ## 当前主线
 
-1. 阶段边界保持不变：只收口单 Agent 当前验收闭环，不新增 `Multi-Agent`、MCP 资源融合或上下文治理阶段 B/C 的实现面。
-2. 仓内主链路只做稳定性维护：默认 `compile` 与 `test` 结果作为当前基线，不因外部 live smoke 阻塞回改应用默认运行时。
-3. 外部排障按固定顺序推进：先处理证书链/TLS，再获取 non-skipped 实调用结果，再依据最新实测结论确认是否出现新的首个阻塞。
-4. 文档与提交节奏跟随验收结果推进：只有当前首个阻塞发生变化或 live smoke 闭环后，才更新阶段结论并进入下一次收口判断。
+1. 阶段边界保持不变，不新增 `Multi-Agent`、MCP 资源融合或上下文治理阶段 B/C 的实现面。
+2. 仓内主链路继续以当前 `compile` / `test` 通过结果作为基线，不因外部 live smoke 阻塞回改应用默认运行时。
+3. 当前最小推进路径固定为：先补齐兼容网关 CA 证书链或 live smoke TLS/JVM 入口参数，再重跑 `./scripts/run-live-smoke.sh`，最后只处理新出现的首个真实阻塞。
 
 ## 下一步入口
 
-1. 第一入口：为兼容网关补齐有效 CA 证书链，或在 live smoke 入口显式提供 `OPENMANUS_LIVE_CA_CERT_FILE`。
-2. 第二入口：补齐证书链后重跑 `./scripts/run-live-smoke.sh`，以最新一次实测结果更新阶段结论。
-3. 第三入口：仅在 `compile`、`test`、`run-live-smoke.sh` 三个入口同时满足当前阶段口径后，再判断是否进入阶段收口。
+1. 优先为当前兼容网关准备可被 JVM 信任的 CA 证书链，或在 live smoke 入口显式提供 `OPENMANUS_LIVE_CA_CERT_FILE`。
+2. 若仅补 CA 仍无法脱离阻塞，再按最小范围补充 `OPENMANUS_LIVE_JDK_TLS_CLIENT_PROTOCOLS`、`OPENMANUS_LIVE_HTTPS_PROTOCOLS` 或 `OPENMANUS_LIVE_JAVA_TOOL_OPTIONS`，且只作用于 `run-live-smoke.sh`。
+3. 完成证书链/TLS 入口收口后立即重跑 `./scripts/run-live-smoke.sh`，并以最新一次 non-skipped 或新的首个真实阻塞结果更新阶段判断。
