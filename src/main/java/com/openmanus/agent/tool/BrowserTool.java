@@ -1,14 +1,13 @@
 package com.openmanus.agent.tool;
 
-import com.openmanus.domain.model.SessionSandboxInfo;
-import com.openmanus.domain.service.SessionSandboxManager;
-import com.openmanus.infra.config.OpenManusProperties;
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
+import com.openmanus.aiframework.runtime.AiProxyConfig;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
+import com.openmanus.aiframework.runtime.AiSessionSandboxInfo;
+import com.openmanus.aiframework.runtime.AiSearchConfig;
+import com.openmanus.aiframework.tool.AiParam;
+import com.openmanus.aiframework.tool.AiTool;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -22,7 +21,7 @@ import java.nio.charset.StandardCharsets;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import static com.openmanus.infra.log.LogMarkers.TO_FRONTEND;
+import static com.openmanus.aiframework.runtime.AiLogMarkers.TO_FRONTEND;
 
 /**
  * 浏览器工具 - 提供网页访问和搜索能力
@@ -31,23 +30,25 @@ import static com.openmanus.infra.log.LogMarkers.TO_FRONTEND;
  * 1. 访问网页并获取内容
  * 2. 搜索网络信息（基于 Bing，国内可访问）
  * 3. 自动管理 VNC 沙箱浏览器
- * 4. 支持代理配置（通过 application.yml）
+ * 4. 支持代理配置（通过 OpenManus 配置）
  * 
  * 设计模式：
  * - 策略模式：不同搜索引擎可扩展
  * - 块解析模式：HTML 结果解析器
  */
-@Component
 @Slf4j
 public class BrowserTool {
     
-    private final SessionSandboxManager sessionSandboxManager;
-    private final OpenManusProperties properties;
-    
-    @Autowired
-    public BrowserTool(SessionSandboxManager sessionSandboxManager, OpenManusProperties properties) {
-        this.sessionSandboxManager = sessionSandboxManager;
-        this.properties = properties;
+    private final AiSessionSandboxGateway sessionSandboxGateway;
+    private final AiSearchConfig searchConfig;
+    private final AiProxyConfig proxyConfig;
+
+    public BrowserTool(AiSessionSandboxGateway sessionSandboxGateway,
+                       AiSearchConfig searchConfig,
+                       AiProxyConfig proxyConfig) {
+        this.sessionSandboxGateway = sessionSandboxGateway;
+        this.searchConfig = searchConfig;
+        this.proxyConfig = proxyConfig;
     }
     
     // 网络配置常量
@@ -73,8 +74,8 @@ public class BrowserTool {
      * 访问网页并获取内容
      * 首次调用时会自动创建 VNC 沙箱浏览器
      */
-    @Tool("访问网页并获取内容")
-    public String browseWeb(@P("网页 URL") String url) {
+    @AiTool("访问网页并获取内容")
+    public String browseWeb(@AiParam("网页 URL") String url) {
         try {
             // 确保沙箱已创建（首次调用时触发）
             ensureSandboxCreated();
@@ -116,8 +117,8 @@ public class BrowserTool {
      * 搜索网络内容
      * 使用 Serper API 获取结构化搜索结果，同时通知前端展示搜索页面
      */
-    @Tool("搜索网络内容")
-    public String searchWeb(@P("搜索关键词") String query) {
+    @AiTool("搜索网络内容")
+    public String searchWeb(@AiParam("搜索关键词") String query) {
         int retryCount = 0;
         Exception lastException = null;
 
@@ -144,8 +145,7 @@ public class BrowserTool {
                 log.info(TO_FRONTEND, "│  🌐 可视化预览: {}", displayUrl);
                 
                 // 检查是否配置了 Serper API
-                OpenManusProperties.SearchConfig searchConfig = properties.getSearch();
-                String apiKey = searchConfig != null ? searchConfig.getApiKey() : null;
+                String apiKey = searchConfig == null ? null : searchConfig.apiKey();
                 
                 if (apiKey == null || apiKey.isEmpty() || apiKey.startsWith("your-")) {
                     log.warn("Serper API 未配置，使用降级方案");
@@ -153,7 +153,7 @@ public class BrowserTool {
                 }
                 
                 // 使用 Serper API 获取搜索结果
-                String results = searchWithSerperApi(query, searchConfig);
+                String results = searchWithSerperApi(query);
                 log.info(TO_FRONTEND, "┌──────────────────────────────────────────────────────────┐");
                 log.info(TO_FRONTEND, "│  ✅ 搜索完成 · 已获取相关结果                              │");
                 log.info(TO_FRONTEND, "└──────────────────────────────────────────────────────────┘");
@@ -173,25 +173,22 @@ public class BrowserTool {
     /**
      * 使用 Serper API 进行搜索
      */
-    private String searchWithSerperApi(String query, OpenManusProperties.SearchConfig config) throws IOException {
-        String endpoint = config.getSerperEndpoint();
-        if (endpoint == null || endpoint.isEmpty()) {
-            endpoint = "https://google.serper.dev/search";
-        }
+    private String searchWithSerperApi(String query) throws IOException {
+        String endpoint = searchConfig.serperEndpoint();
         
         // 构建请求
         HttpURLConnection connection = (HttpURLConnection) URI.create(endpoint).toURL().openConnection();
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(DEFAULT_TIMEOUT_MS);
         connection.setReadTimeout(DEFAULT_TIMEOUT_MS);
-        connection.setRequestProperty("X-API-KEY", config.getApiKey());
+        connection.setRequestProperty("X-API-KEY", searchConfig.apiKey());
         connection.setRequestProperty("Content-Type", "application/json");
         connection.setDoOutput(true);
         
         // 构建 JSON 请求体
         String requestBody = String.format("{\"q\":\"%s\",\"num\":%d}", 
                 query.replace("\"", "\\\""), 
-                Math.min(config.getMaxResults(), MAX_SEARCH_RESULTS));
+                Math.min(searchConfig.maxResults(), MAX_SEARCH_RESULTS));
         
         try (OutputStream os = connection.getOutputStream()) {
             os.write(requestBody.getBytes(StandardCharsets.UTF_8));
@@ -265,7 +262,7 @@ public class BrowserTool {
                 results.append("共找到 ").append(count).append(" 个相关结果\n");
             }
             
-        } catch (Exception e) {
+        } catch (IOException e) {
             log.warn("解析 Serper 结果时出错: {}", e.getMessage());
             results.append("搜索结果解析失败: ").append(e.getMessage()).append("\n");
         }
@@ -284,7 +281,7 @@ public class BrowserTool {
     private String fallbackSearch(String query, String encodedQuery) {
         StringBuilder results = new StringBuilder();
         results.append("🔍 搜索结果: ").append(query).append("\n\n");
-        results.append("⚠️ 搜索 API 未配置，请在 application.yml 中配置 Serper API Key：\n\n");
+        results.append("⚠️ 搜索 API 未配置，请通过环境变量或 OpenManus 配置提供 Serper API Key：\n\n");
         results.append("```yaml\n");
         results.append("openmanus:\n");
         results.append("  search:\n");
@@ -331,11 +328,10 @@ public class BrowserTool {
      * 获取代理配置
      */
     private java.net.Proxy getProxy() {
-        OpenManusProperties.ProxyConfig proxyConfig = properties.getProxy();
-        if (proxyConfig != null && proxyConfig.isEnabled()) {
-            String proxyUrl = proxyConfig.getHttpsProxy(); // 优先使用 HTTPS 代理
+        if (proxyConfig != null && proxyConfig.enabled()) {
+            String proxyUrl = proxyConfig.httpsProxy(); // 优先使用 HTTPS 代理
             if (proxyUrl == null || proxyUrl.isEmpty()) {
-                proxyUrl = proxyConfig.getHttpProxy();
+                proxyUrl = proxyConfig.httpProxy();
             }
             
             if (proxyUrl != null && !proxyUrl.isEmpty()) {
@@ -385,10 +381,14 @@ public class BrowserTool {
             log.warn("MDC 中未找到 sessionId，跳过沙箱创建");
             return;
         }
+        if (sessionSandboxGateway == null) {
+            log.warn("未配置会话沙箱网关，跳过沙箱创建");
+            return;
+        }
         
         try {
             // 检查是否已存在沙箱
-            SessionSandboxInfo sandboxInfo = sessionSandboxManager.getSandboxInfo(sessionId)
+            AiSessionSandboxInfo sandboxInfo = sessionSandboxGateway.getSandboxInfo(sessionId)
                 .orElse(null);
             
             if (sandboxInfo == null || !sandboxInfo.isAvailable()) {
@@ -398,9 +398,9 @@ public class BrowserTool {
                 log.info(TO_FRONTEND, "├──────────────────────────────────────────────────────────┤");
                 log.info(TO_FRONTEND, "│  ⚡ 正在初始化安全沙箱环境...                              │");
                 log.info(TO_FRONTEND, "└──────────────────────────────────────────────────────────┘");
-                sandboxInfo = sessionSandboxManager.getOrCreateSandbox(sessionId);
+                sandboxInfo = sessionSandboxGateway.getOrCreateSandbox(sessionId);
                 log.info(TO_FRONTEND, "│  ✅ 沙箱已就绪 · VNC 可视化界面已开放                        │");
-                log.debug("沙箱已创建: sessionId={}, vncUrl={}", sessionId, sandboxInfo.getVncUrl());
+                log.debug("沙箱已创建: sessionId={}, vncUrl={}", sessionId, sandboxInfo.vncUrl());
             } else {
                 log.debug("复用现有沙箱: sessionId={}", sessionId);
             }

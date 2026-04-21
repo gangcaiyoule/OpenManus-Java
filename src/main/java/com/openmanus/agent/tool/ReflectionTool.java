@@ -1,9 +1,8 @@
 package com.openmanus.agent.tool;
 
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
+import com.openmanus.aiframework.tool.AiParam;
+import com.openmanus.aiframework.tool.AiTool;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -20,41 +19,42 @@ import java.util.concurrent.ConcurrentHashMap;
  * 
  * 采用 Record 模式简化数据对象
  */
-@Component
 @Slf4j
 public class ReflectionTool {
-    
+
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int MAX_RESULT_PREVIEW_LENGTH = 100;
-    
-    // 任务执行历史记录
-    private final Map<String, TaskRecord> taskHistory = new ConcurrentHashMap<>();
-    
-    @Tool("记录任务执行过程，用于后续反思")
-    public String recordTask(@P("任务ID") String taskId, 
-                           @P("任务描述") String taskDescription,
-                           @P("执行步骤") String steps,
-                           @P("使用的工具") String toolsUsed,
-                           @P("执行结果") String result) {
+    private static final String DEFAULT_MEMORY_BUCKET = "__default__";
+
+    // 按 memoryId 隔离任务执行历史记录，避免跨会话串扰
+    private final Map<String, Map<String, TaskRecord>> taskHistoryByMemory = new ConcurrentHashMap<>();
+
+    @AiTool("记录任务执行过程，用于后续反思")
+    public String recordTask(@AiParam("任务ID") String taskId,
+                           @AiParam("任务描述") String taskDescription,
+                           @AiParam("执行步骤") String steps,
+                           @AiParam("使用的工具") String toolsUsed,
+                           @AiParam("执行结果") String result,
+                           String memoryId) {
         try {
             TaskRecord record = new TaskRecord(taskId, taskDescription, steps, toolsUsed, result, LocalDateTime.now());
-            taskHistory.put(taskId, record);
-            log.info("记录任务执行: {}", taskId);
+            tasksForMemory(memoryId).put(taskId, record);
+            log.info("记录任务执行: memoryId={}, taskId={}", normalizeMemoryId(memoryId), taskId);
             return "任务执行记录已保存，可进行后续反思分析";
         } catch (Exception e) {
             log.error("记录任务失败", e);
             return "记录任务失败: " + e.getMessage();
         }
     }
-    
-    @Tool("对指定任务进行反思分析")
-    public String reflectOnTask(@P("任务ID") String taskId) {
+
+    @AiTool("对指定任务进行反思分析")
+    public String reflectOnTask(@AiParam("任务ID") String taskId, String memoryId) {
         try {
-            TaskRecord record = taskHistory.get(taskId);
+            TaskRecord record = tasksForMemory(memoryId).get(taskId);
             if (record == null) {
                 return "未找到任务记录: " + taskId;
             }
-            
+
             String reflection = """
                 📋 任务反思分析
                 
@@ -82,29 +82,30 @@ public class ReflectionTool {
                     record.executionTime().format(DATE_FORMATTER),
                     record.steps(),
                     record.toolsUsed(),
-                    record.result()
+                    safeText(record.result())
                 );
-            
-            log.info("生成任务反思: {}", taskId);
+
+            log.info("生成任务反思: memoryId={}, taskId={}", normalizeMemoryId(memoryId), taskId);
             return reflection;
         } catch (Exception e) {
             log.error("任务反思失败", e);
             return "任务反思失败: " + e.getMessage();
         }
     }
-    
-    @Tool("获取所有任务历史记录")
-    public String getTaskHistory() {
+
+    @AiTool("获取所有任务历史记录")
+    public String getTaskHistory(String memoryId) {
         try {
-            if (taskHistory.isEmpty()) {
+            Map<String, TaskRecord> scopedHistory = tasksForMemory(memoryId);
+            if (scopedHistory.isEmpty()) {
                 return "暂无任务历史记录";
             }
-            
+
             StringBuilder sb = new StringBuilder("📚 任务历史记录\n\n");
-            taskHistory.values().stream()
+            scopedHistory.values().stream()
                 .sorted((a, b) -> b.executionTime().compareTo(a.executionTime()))
                 .forEach(record -> sb.append(formatHistoryRecord(record)));
-            
+
             return sb.toString();
         } catch (Exception e) {
             log.error("获取任务历史失败", e);
@@ -116,10 +117,11 @@ public class ReflectionTool {
      * 格式化历史记录条目
      */
     private String formatHistoryRecord(TaskRecord record) {
-        String resultPreview = record.result().length() > MAX_RESULT_PREVIEW_LENGTH 
-            ? record.result().substring(0, MAX_RESULT_PREVIEW_LENGTH) + "..." 
-            : record.result();
-        
+        String result = safeText(record.result());
+        String resultPreview = result.length() > MAX_RESULT_PREVIEW_LENGTH
+            ? result.substring(0, MAX_RESULT_PREVIEW_LENGTH) + "..."
+            : result;
+
         return """
             ID: %s
             描述: %s
@@ -133,7 +135,22 @@ public class ReflectionTool {
                 resultPreview
             );
     }
-    
+
+    private Map<String, TaskRecord> tasksForMemory(String memoryId) {
+        return taskHistoryByMemory.computeIfAbsent(normalizeMemoryId(memoryId), ignored -> new ConcurrentHashMap<>());
+    }
+
+    private String normalizeMemoryId(String memoryId) {
+        if (memoryId == null || memoryId.isBlank()) {
+            return DEFAULT_MEMORY_BUCKET;
+        }
+        return memoryId.trim();
+    }
+
+    private static String safeText(String value) {
+        return value == null ? "" : value;
+    }
+
     /**
      * 任务记录 - 使用 Record 简化不可变数据对象
      */

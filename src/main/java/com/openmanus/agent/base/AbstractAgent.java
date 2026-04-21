@@ -1,19 +1,16 @@
 package com.openmanus.agent.base;
 
-import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
-import dev.langchain4j.service.tool.ToolExecutor;
+import com.openmanus.aiframework.runtime.model.AiAgentParameterSchema;
 
-import java.util.Map;
 import java.util.Objects;
 
-public abstract class AbstractAgent<B extends AbstractAgent.Builder<B>> implements ToolExecutor {
+public abstract class AbstractAgent<B extends AbstractAgent.Builder<B>> {
 
     public static abstract class Builder<B extends Builder<B>> {
 
         private String name;
         private String description;
-        private JsonObjectSchema parameters;
+        private AiAgentParameterSchema parameters;
 
         @SuppressWarnings("unchecked")
         protected B result() {
@@ -21,21 +18,21 @@ public abstract class AbstractAgent<B extends AbstractAgent.Builder<B>> implemen
         }
 
         public B name(String name) {
-            if( this.name == null ) {
+            if (this.name == null) {
                 this.name = name;
             }
             return result();
         }
 
         public B description(String description) {
-            if( this.description == null ) {
+            if (this.description == null) {
                 this.description = description;
             }
             return result();
         }
 
-        public B parameters(JsonObjectSchema parameters) {
-            if( this.parameters == null ) {
+        public B parameters(AiAgentParameterSchema parameters) {
+            if (this.parameters == null) {
                 this.parameters = parameters;
             }
             return result();
@@ -43,19 +40,18 @@ public abstract class AbstractAgent<B extends AbstractAgent.Builder<B>> implemen
 
         public B singleParameter(String context) {
             if (this.parameters == null) {
-                this.parameters = JsonObjectSchema.builder()
-                        .addStringProperty("context",
-                                Objects.requireNonNull(context, "context cannot be null"))
-                        .build();
+                this.parameters = AiAgentParameterSchema.singleStringParameter(
+                        "context",
+                        Objects.requireNonNull(context, "context cannot be null")
+                );
             }
             return result();
         }
-
     }
 
     private final String name;
     private final String description;
-    private final JsonObjectSchema parameters;
+    private final AiAgentParameterSchema parameters;
 
     public String name() {
         return name;
@@ -65,24 +61,13 @@ public abstract class AbstractAgent<B extends AbstractAgent.Builder<B>> implemen
         return description;
     }
 
-    public JsonObjectSchema parameters() {
+    public AiAgentParameterSchema parameters() {
         return parameters;
     }
 
-    public Map.Entry<ToolSpecification, ToolExecutor> asTool() {
-        var spec = ToolSpecification.builder()
-                .name(name())
-                .description(description())
-                .parameters(parameters())
-                .build();
-        return Map.entry(spec, this);
+    public AbstractAgent(Builder<B> builder) {
+        this.name = Objects.requireNonNull(builder.name, "name cannot be null");
+        this.description = Objects.requireNonNull(builder.description, "description cannot be null");
+        this.parameters = Objects.requireNonNull(builder.parameters, "parameters cannot be null");
     }
-
-    public AbstractAgent(Builder<B> builder ) {
-
-        this.name = Objects.requireNonNull( builder.name, "name cannot be null" );
-        this.description = Objects.requireNonNull( builder.description, "description cannot be null" );
-        this.parameters = Objects.requireNonNull( builder.parameters, "parameters cannot be null" );
-    }
-
 }

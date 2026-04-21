@@ -23,11 +23,6 @@ public class WorkflowResponse {
     private String sessionId;
     
     /**
-     * WebSocket订阅主题
-     */
-    private String topic;
-    
-    /**
      * 错误信息，如果有的话
      */
     private String error;
@@ -43,8 +38,4 @@ public class WorkflowResponse {
      */
     private String sandboxVncUrl;
     
-    /**
-     * 沙箱容器 ID
-     */
-    private String sandboxContainerId;
 } 

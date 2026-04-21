@@ -1,14 +1,12 @@
 package com.openmanus.agent.tool;
 
-import com.openmanus.domain.service.SessionSandboxManager;
 import com.openmanus.agent.tool.support.SandboxPathResolver;
-import com.openmanus.infra.sandbox.ExecutionResult;
-import com.openmanus.infra.sandbox.SandboxClient;
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
+import com.openmanus.aiframework.runtime.AiCodeExecutionResult;
+import com.openmanus.aiframework.runtime.AiCodeSandbox;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
+import com.openmanus.aiframework.tool.AiParam;
+import com.openmanus.aiframework.tool.AiTool;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -24,32 +22,30 @@ import java.nio.file.Path;
  * 
  * 设计模式：模板方法模式 + 策略模式（沙箱/本地执行）
  */
-@Component
 @Slf4j
 public class PythonTool {
     
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     
-    private final SandboxClient sandboxClient;
+    private final AiCodeSandbox sandbox;
     private final SandboxPathResolver sandboxPathResolver;
 
-    public PythonTool(SandboxClient sandboxClient, SessionSandboxManager sessionSandboxManager) {
-        this(sandboxClient, new SandboxPathResolver(sessionSandboxManager));
+    public PythonTool(AiCodeSandbox sandbox, AiSessionSandboxGateway sessionSandboxGateway) {
+        this(sandbox, new SandboxPathResolver(sessionSandboxGateway));
     }
-    
-    @Autowired
-    public PythonTool(SandboxClient sandboxClient, SandboxPathResolver sandboxPathResolver) {
-        this.sandboxClient = sandboxClient;
+
+    public PythonTool(AiCodeSandbox sandbox, SandboxPathResolver sandboxPathResolver) {
+        this.sandbox = sandbox;
         this.sandboxPathResolver = sandboxPathResolver;
     }
     
     /**
      * 执行 Python 代码字符串（在沙箱中）
      */
-    @Tool("在沙箱中执行Python代码")
+    @AiTool("在沙箱中执行Python代码")
     public String executePython(
-            @P("思考过程或代码计划的简要说明") String thought,
-            @P("要执行的Python代码") String code) {
+            @AiParam("思考过程或代码计划的简要说明") String thought,
+            @AiParam("要执行的Python代码") String code) {
         if (code == null || code.isBlank()) {
             return "执行失败: Python代码不能为空";
         }
@@ -59,7 +55,7 @@ public class PythonTool {
         
         try {
             // 在沙箱中直接执行代码
-            ExecutionResult result = sandboxClient.executePython(code, DEFAULT_TIMEOUT_SECONDS);
+            AiCodeExecutionResult result = sandbox.executePython(code, DEFAULT_TIMEOUT_SECONDS);
             return formatExecutionResult(result);
         } catch (Exception e) {
             log.error("Python 代码执行失败", e);
@@ -70,8 +66,8 @@ public class PythonTool {
     /**
      * 执行 Python 文件（在沙箱中）
      */
-    @Tool("执行Python文件")
-    public String executePythonFile(@P("Python文件路径") String filePath) {
+    @AiTool("执行Python文件")
+    public String executePythonFile(@AiParam("Python文件路径") String filePath) {
         log.info("执行 Python 文件: {}", filePath);
         
         try {
@@ -82,7 +78,7 @@ public class PythonTool {
             
             // 读取文件内容并在沙箱中执行
             String code = Files.readString(path, StandardCharsets.UTF_8);
-            ExecutionResult result = sandboxClient.executePython(code, DEFAULT_TIMEOUT_SECONDS);
+            AiCodeExecutionResult result = sandbox.executePython(code, DEFAULT_TIMEOUT_SECONDS);
             return formatExecutionResult(result);
             
         } catch (SecurityException e) {
@@ -104,22 +100,22 @@ public class PythonTool {
     /**
      * 格式化执行结果
      */
-    private String formatExecutionResult(ExecutionResult result) {
-        if (result.getExitCode() == 0) {
-            String output = result.getStdout().trim();
+    private String formatExecutionResult(AiCodeExecutionResult result) {
+        if (result.exitCode() == 0) {
+            String output = result.stdout().trim();
             if (output.isEmpty()) {
                 return "✅ 执行成功 (无输出)";
             }
             return "✅ 执行成功:\n" + output;
         } else {
             StringBuilder error = new StringBuilder();
-            error.append("❌ 执行失败 (退出码: ").append(result.getExitCode()).append(")");
+            error.append("❌ 执行失败 (退出码: ").append(result.exitCode()).append(")");
             
-            if (!result.getStderr().isEmpty()) {
-                error.append("\n错误信息:\n").append(result.getStderr());
+            if (!result.stderr().isEmpty()) {
+                error.append("\n错误信息:\n").append(result.stderr());
             }
-            if (!result.getStdout().isEmpty()) {
-                error.append("\n标准输出:\n").append(result.getStdout());
+            if (!result.stdout().isEmpty()) {
+                error.append("\n标准输出:\n").append(result.stdout());
             }
             
             return error.toString();

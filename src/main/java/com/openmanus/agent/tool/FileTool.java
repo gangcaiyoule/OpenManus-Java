@@ -1,12 +1,10 @@
 package com.openmanus.agent.tool;
 
-import com.openmanus.domain.service.SessionSandboxManager;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
 import com.openmanus.agent.tool.support.SandboxPathResolver;
-import dev.langchain4j.agent.tool.P;
-import dev.langchain4j.agent.tool.Tool;
+import com.openmanus.aiframework.tool.AiParam;
+import com.openmanus.aiframework.tool.AiTool;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,23 +22,21 @@ import java.util.stream.Stream;
  * 
  * 采用模板方法模式统一异常处理
  */
-@Component
 @Slf4j
 public class FileTool {
 
     private final SandboxPathResolver sandboxPathResolver;
 
-    public FileTool(SessionSandboxManager sessionSandboxManager) {
-        this(new SandboxPathResolver(sessionSandboxManager));
+    public FileTool(AiSessionSandboxGateway sessionSandboxGateway) {
+        this(new SandboxPathResolver(sessionSandboxGateway));
     }
 
-    @Autowired
     public FileTool(SandboxPathResolver sandboxPathResolver) {
         this.sandboxPathResolver = sandboxPathResolver;
     }
 
-    @Tool("读取文件内容")
-    public String readFile(@P("文件路径") String filePath) {
+    @AiTool("读取文件内容")
+    public String readFile(@AiParam("文件路径") String filePath) {
         return executeFileOperation(filePath, path -> {
             if (!Files.exists(path)) {
                 return "文件不存在: " + filePath;
@@ -52,8 +48,8 @@ public class FileTool {
         }, "读取文件");
     }
 
-    @Tool("写入文件内容")
-    public String writeFile(@P("文件路径") String filePath, @P("文件内容") String content) {
+    @AiTool("写入文件内容")
+    public String writeFile(@AiParam("文件路径") String filePath, @AiParam("文件内容") String content) {
         if (filePath == null || filePath.isBlank()) {
             return "写入文件失败: 文件路径不能为空";
         }
@@ -65,8 +61,8 @@ public class FileTool {
         }, "写入文件");
     }
 
-    @Tool("追加文件内容")
-    public String appendFile(@P("文件路径") String filePath, @P("追加的内容") String content) {
+    @AiTool("追加文件内容")
+    public String appendFile(@AiParam("文件路径") String filePath, @AiParam("追加的内容") String content) {
         if (filePath == null || filePath.isBlank()) {
             return "追加文件失败: 文件路径不能为空";
         }
@@ -78,8 +74,8 @@ public class FileTool {
         }, "追加文件");
     }
     
-    @Tool("列出目录内容")
-    public String listDirectory(@P("目录路径") String dirPath) {
+    @AiTool("列出目录内容")
+    public String listDirectory(@AiParam("目录路径") String dirPath) {
         return executeFileOperation(dirPath, path -> {
             if (!Files.exists(path)) {
                 return "目录不存在: " + dirPath;
@@ -102,21 +98,21 @@ public class FileTool {
         }, "列出目录");
     }
 
-    @Tool("创建目录")
-    public String createDirectory(@P("目录路径") String dirPath) {
+    @AiTool("创建目录")
+    public String createDirectory(@AiParam("目录路径") String dirPath) {
         return executeFileOperation(dirPath, path -> {
             Files.createDirectories(path);
             return "目录创建成功: " + dirPath;
         }, "创建目录");
     }
 
-    @Tool("删除文件或目录")
-    public String deleteFile(@P("文件或目录路径") String targetPath) {
+    @AiTool("删除文件或目录")
+    public String deleteFile(@AiParam("文件或目录路径") String targetPath) {
         return "删除操作已禁用：当前为安全模式，仅允许读写和目录浏览。";
     }
     
-    @Tool("检查文件是否存在")
-    public String fileExists(@P("文件路径") String filePath) {
+    @AiTool("检查文件是否存在")
+    public String fileExists(@AiParam("文件路径") String filePath) {
         try {
             Path path = sandboxPathResolver.resolveSandboxPath(filePath);
             return Files.exists(path) ? "文件存在: " + filePath : "文件不存在: " + filePath;
@@ -129,8 +125,8 @@ public class FileTool {
         }
     }
     
-    @Tool("获取文件信息")
-    public String getFileInfo(@P("文件路径") String filePath) {
+    @AiTool("获取文件信息")
+    public String getFileInfo(@AiParam("文件路径") String filePath) {
         return executeFileOperation(filePath, path -> {
             if (!Files.exists(path)) {
                 return "文件不存在: " + filePath;

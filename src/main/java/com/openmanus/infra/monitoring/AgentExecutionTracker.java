@@ -278,13 +278,18 @@ public class AgentExecutionTracker {
         }
 
         long successCount = events.stream()
-                .filter(e -> e.getStatus() == AgentExecutionEvent.ExecutionStatus.SUCCESS)
+                .filter(this::isSuccessfulTerminalExecutionEvent)
                 .count();
         long errorCount = events.stream()
-                .filter(e -> e.getStatus() == AgentExecutionEvent.ExecutionStatus.FAILED)
+                .filter(e -> e.getStatus() == AgentExecutionEvent.ExecutionStatus.FAILED
+                        || e.getStatus() == AgentExecutionEvent.ExecutionStatus.ERROR
+                        || e.getStatus() == AgentExecutionEvent.ExecutionStatus.TIMEOUT)
                 .count();
 
         Map<String, Object> stats = new HashMap<>();
+        long terminalEventCount = events.stream()
+                .filter(this::isTerminalExecutionEvent)
+                .count();
         stats.put("totalEvents", events.size());
         stats.put("agentCount", events.stream().map(AgentExecutionEvent::getAgentName).distinct().count());
         stats.put("successCount", successCount);
@@ -297,9 +302,18 @@ public class AgentExecutionTracker {
                 .collect(Collectors.groupingBy(AgentExecutionEvent::getAgentType, Collectors.counting())));
         stats.put("eventTypeStats", events.stream()
                 .collect(Collectors.groupingBy(e -> e.getEventType().toString(), Collectors.counting())));
-        stats.put("successRate", (double) successCount / events.size() * 100);
+        stats.put("successRate", terminalEventCount == 0 ? 0.0d : (double) successCount / terminalEventCount * 100);
 
         return stats;
+    }
+
+    private boolean isTerminalExecutionEvent(AgentExecutionEvent event) {
+        return event.getEventType() == AgentExecutionEvent.EventType.AGENT_END;
+    }
+
+    private boolean isSuccessfulTerminalExecutionEvent(AgentExecutionEvent event) {
+        return isTerminalExecutionEvent(event)
+                && event.getStatus() == AgentExecutionEvent.ExecutionStatus.SUCCESS;
     }
 
     // ==================== 详细执行流程追踪 ====================

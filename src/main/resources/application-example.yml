@@ -1,5 +1,5 @@
 # OpenManus Java Configuration Example
-# 复制此文件为 application-local.yml 并填入真实的配置值
+# 非敏感配置示例，敏感信息请放在项目根目录 .env
 
 openmanus:
   app:
@@ -8,39 +8,17 @@ openmanus:
     workspace-root: "./workspace"
     log-level: "INFO"
 
+  # LLM 默认通过根目录 .env 注入，推荐使用以下变量：
+  # OPENMANUS_LLM_DEFAULT_LLM_API_TYPE=openai
+  # OPENMANUS_LLM_DEFAULT_LLM_BASE_URL=https://api.openai.com/v1
+  # OPENMANUS_LLM_DEFAULT_LLM_API_KEY=your-api-key
+  # OPENMANUS_LLM_DEFAULT_LLM_MODEL=gpt-5.4
   llm:
     default-llm:
-      model: "qwen-max"
-      base-url: "https://dashscope.aliyuncs.com/compatible-mode/v1/"
-      api-type: "openai"
       temperature: 0.7
       max-tokens: 8192
       timeout: 120
-      # 请在 application-local.yml 中设置真实的 API key
-      api-key: "your-dashscope-api-key-here"
-    # 新增：多 Provider 配置（aiframework 使用）
-    providers:
-      openai:
-        api-type: "openai"
-        model: "gpt-4o-mini"
-        base-url: "https://api.openai.com/v1"
-        api-key: "your-openai-api-key"
-        timeout: 120
-        max-retries: 1
-      anthropic:
-        api-type: "anthropic"
-        model: "claude-3-5-sonnet-latest"
-        base-url: "https://api.anthropic.com"
-        api-key: "your-anthropic-api-key"
-        timeout: 120
-        max-retries: 1
-      gemini:
-        api-type: "gemini"
-        model: "gemini-1.5-pro"
-        base-url: "https://generativelanguage.googleapis.com"
-        api-key: "your-gemini-api-key"
-        timeout: 120
-        max-retries: 1
+    providers: {}
 
   sandbox:
     type: "docker"
@@ -62,6 +40,14 @@ openmanus:
     enabled: false
     http-proxy: ""
     https-proxy: ""
+
+  web-proxy:
+    # 是否暴露 /api/proxy/web 与 /api/proxy/url
+    # 也可通过环境变量 OPENMANUS_WEB_PROXY_ENABLED 覆盖
+    enabled: false
+    # 允许跨域调用 Web 代理接口的 origin 白名单；为空时不开放跨域访问
+    # 也可通过环境变量 OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS 覆盖，使用逗号分隔
+    allowed-origins: []
 
   search:
     engine: "serper"
@@ -167,6 +153,11 @@ openmanus:
     # 每轮最多回填多少条工具结果（默认 2，0 表示不限制）
     # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND 覆盖
     tool-result-rehydrate-max-per-round: 2
+
+  mcp:
+    # 是否允许 MCP 工具进入当前 Agent 工具链
+    # 也可通过环境变量 OPENMANUS_MCP_ENABLED 覆盖
+    enabled: false
 
 # Spring Boot Configuration
 server:

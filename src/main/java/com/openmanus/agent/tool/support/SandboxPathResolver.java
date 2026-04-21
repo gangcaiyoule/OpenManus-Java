@@ -1,24 +1,22 @@
 package com.openmanus.agent.tool.support;
 
-import com.openmanus.domain.service.SessionSandboxManager;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
 import org.slf4j.MDC;
-import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-@Component
 public class SandboxPathResolver {
 
-    private final SessionSandboxManager sessionSandboxManager;
+    private final AiSessionSandboxGateway sessionSandboxGateway;
 
-    public SandboxPathResolver(SessionSandboxManager sessionSandboxManager) {
-        this.sessionSandboxManager = sessionSandboxManager;
+    public SandboxPathResolver(AiSessionSandboxGateway sessionSandboxGateway) {
+        this.sessionSandboxGateway = sessionSandboxGateway;
     }
 
     public Path resolveSandboxPath(String userPath) {
         String sessionId = requireSessionId();
-        Path sandboxRoot = sessionSandboxManager.getOrCreateFileSandboxRoot(sessionId).toAbsolutePath().normalize();
+        Path sandboxRoot = sessionSandboxGateway.getOrCreateFileSandboxRoot(sessionId).toAbsolutePath().normalize();
 
         String candidate = userPath == null || userPath.isBlank() ? "." : userPath;
         Path relativeCandidate = Paths.get(candidate);

@@ -5,7 +5,6 @@ import com.openmanus.agent.tool.BrowserTool;
 import com.openmanus.agent.tool.FileTool;
 import com.openmanus.agent.tool.PythonTool;
 import com.openmanus.agent.tool.ReflectionTool;
-import dev.langchain4j.data.message.SystemMessage;
 
 /**
  * 单智能体执行器：
@@ -70,7 +69,7 @@ public class UnifiedAgent extends AbstractAgentExecutor<UnifiedAgent.Builder> {
             this.name("unified_agent")
                     .description("单智能体模式：统一调用搜索、代码、文件与反思工具，完成端到端任务。")
                     .singleParameter("用户请求")
-                    .systemMessage(SystemMessage.from(SYSTEM_PROMPT));
+                    .systemMessage(SYSTEM_PROMPT);
 
             if (browserTool != null) {
                 this.toolFromObject(browserTool);

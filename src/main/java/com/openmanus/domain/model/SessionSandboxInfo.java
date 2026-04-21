@@ -8,15 +8,9 @@ import lombok.NoArgsConstructor;
 import java.time.LocalDateTime;
 
 /**
- * 会话沙箱信息模型
- * 
- * 用于存储每个会话关联的沙箱容器信息，包括：
- * - VNC 访问 URL
- * - 容器 ID
- * - 创建时间
- * - 状态信息
- * 
- * 设计模式：值对象模式（Value Object）- 封装沙箱元数据
+ * 会话沙箱信息模型。
+ *
+ * 只保留会话级编排所需快照，不暴露容器 ID、端口等运行时细节。
  */
 @Data
 @Builder
@@ -30,21 +24,11 @@ public class SessionSandboxInfo {
     private String sessionId;
     
     /**
-     * VNC 沙箱容器 ID
-     */
-    private String containerId;
-    
-    /**
      * VNC Web 访问 URL
      * 前端通过 iframe 嵌入此 URL 来展示浏览器工作台
      */
     private String vncUrl;
-    
-    /**
-     * 容器映射的主机端口
-     */
-    private Integer mappedPort;
-    
+
     /**
      * 沙箱创建时间
      */
@@ -76,4 +60,3 @@ public class SessionSandboxInfo {
         return status == SandboxStatus.RUNNING && vncUrl != null && !vncUrl.isEmpty();
     }
 }
-

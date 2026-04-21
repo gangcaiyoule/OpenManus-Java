@@ -6,14 +6,18 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.annotation.PostConstruct;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * OpenManus Configuration Properties
  *
  * Centralized configuration management for OpenManus project
- * Supports configuration from application.yml and environment variables
+ * Supports configuration from Spring config files and environment variables
  */
 @Data
 @Slf4j
@@ -55,6 +59,12 @@ public class OpenManusProperties {
      */
     @NestedConfigurationProperty
     private SearchConfig search = new SearchConfig();
+
+    /**
+     * Web proxy exposure configuration.
+     */
+    @NestedConfigurationProperty
+    private WebProxyConfig webProxy = new WebProxyConfig();
     
     /**
      * Runflow configuration
@@ -69,6 +79,12 @@ public class OpenManusProperties {
     private ChatMemoryConfig chatMemory = new ChatMemoryConfig();
 
     /**
+     * MCP runtime configuration.
+     */
+    @NestedConfigurationProperty
+    private McpConfig mcp = new McpConfig();
+
+    /**
      * Legacy mapping logging configuration.
      */
     @NestedConfigurationProperty
@@ -77,6 +93,28 @@ public class OpenManusProperties {
     @PostConstruct
     void applyEnvFallbacks() {
         if (llm != null && llm.getDefaultLlm() != null) {
+            if (isBlank(llm.getDefaultLlm().getApiType())) {
+                String apiType = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_API_TYPE",
+                        "OPENMANUS_LLM_DEFAULTLLM_APITYPE",
+                        "OPENAI_API_TYPE"
+                );
+                if (!isBlank(apiType)) {
+                    llm.getDefaultLlm().setApiType(apiType);
+                }
+            }
+
+            if (isBlank(llm.getDefaultLlm().getBaseUrl())) {
+                String baseUrl = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_BASE_URL",
+                        "OPENMANUS_LLM_DEFAULTLLM_BASEURL",
+                        "OPENAI_BASE_URL"
+                );
+                if (!isBlank(baseUrl)) {
+                    llm.getDefaultLlm().setBaseUrl(baseUrl);
+                }
+            }
+
             String apiKey = llm.getDefaultLlm().getApiKey();
             if (isBlank(apiKey)) {
                 String envKey = firstNonBlankEnv(
@@ -86,6 +124,17 @@ public class OpenManusProperties {
                 );
                 if (!isBlank(envKey)) {
                     llm.getDefaultLlm().setApiKey(envKey);
+                }
+            }
+
+            if (isBlank(llm.getDefaultLlm().getModel())) {
+                String model = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_MODEL",
+                        "OPENMANUS_LLM_DEFAULTLLM_MODEL",
+                        "OPENAI_MODEL"
+                );
+                if (!isBlank(model)) {
+                    llm.getDefaultLlm().setModel(model);
                 }
             }
         }
@@ -105,11 +154,26 @@ public class OpenManusProperties {
             }
         }
 
+        if (webProxy != null) {
+            if (webProxy.enabled == null) {
+                String enabled = firstNonBlankEnv("OPENMANUS_WEB_PROXY_ENABLED");
+                if (!isBlank(enabled)) {
+                    webProxy.setEnabled(parseBooleanStrict(enabled, webProxy.isEnabled()));
+                }
+            }
+            if (webProxy.allowedOrigins == null || webProxy.allowedOrigins.isEmpty()) {
+                String allowedOrigins = firstNonBlankEnv("OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS");
+                if (!isBlank(allowedOrigins)) {
+                    webProxy.setAllowedOrigins(parseCsvList(allowedOrigins));
+                }
+            }
+        }
+
         if (chatMemory != null) {
             if (isBlank(chatMemory.getStoreType())) {
                 String storeType = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_STORE_TYPE");
                 if (!isBlank(storeType)) {
-                    chatMemory.setStoreType(storeType.trim().toLowerCase());
+                    chatMemory.setStoreType(storeType.trim().toLowerCase(Locale.ROOT));
                 }
             }
             if (shouldApplyChatMemoryFileStoreDirFallback(chatMemory)) {
@@ -177,6 +241,13 @@ public class OpenManusProperties {
                             approxTokens, chatMemory.getModelContextMaxApproxTokens()));
                 }
             }
+            if (isBlank(chatMemory.getModelContextTokenCountModeRaw())) {
+                String countMode = firstNonBlankEnv(
+                        "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE");
+                if (!isBlank(countMode)) {
+                    chatMemory.setModelContextTokenCountMode(countMode);
+                }
+            }
             if (chatMemory.compactToolResultsEnabled == null) {
                 String compactEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_TOOL_RESULTS_ENABLED");
                 if (!isBlank(compactEnabled)) {
@@ -204,6 +275,41 @@ public class OpenManusProperties {
                 if (!isBlank(threshold)) {
                     chatMemory.setReactRepeatedToolCallThreshold(parseNonNegativeInt(
                             threshold, chatMemory.getReactRepeatedToolCallThreshold()));
+                }
+            }
+            if (chatMemory.taskStatePlanMaxChars == null) {
+                String planMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_PLAN_MAX_CHARS");
+                if (!isBlank(planMaxChars)) {
+                    chatMemory.setTaskStatePlanMaxChars(parsePositiveInt(
+                            planMaxChars, chatMemory.getTaskStatePlanMaxChars()));
+                }
+            }
+            if (chatMemory.taskStateInProgressMaxChars == null) {
+                String inProgressMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_IN_PROGRESS_MAX_CHARS");
+                if (!isBlank(inProgressMaxChars)) {
+                    chatMemory.setTaskStateInProgressMaxChars(parsePositiveInt(
+                            inProgressMaxChars, chatMemory.getTaskStateInProgressMaxChars()));
+                }
+            }
+            if (chatMemory.taskStateLastFailureMaxChars == null) {
+                String lastFailureMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_LAST_FAILURE_MAX_CHARS");
+                if (!isBlank(lastFailureMaxChars)) {
+                    chatMemory.setTaskStateLastFailureMaxChars(parsePositiveInt(
+                            lastFailureMaxChars, chatMemory.getTaskStateLastFailureMaxChars()));
+                }
+            }
+            if (chatMemory.taskStateTodoMaxItems == null) {
+                String todoMaxItems = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_MAX_ITEMS");
+                if (!isBlank(todoMaxItems)) {
+                    chatMemory.setTaskStateTodoMaxItems(parsePositiveInt(
+                            todoMaxItems, chatMemory.getTaskStateTodoMaxItems()));
+                }
+            }
+            if (chatMemory.taskStateTodoItemMaxChars == null) {
+                String todoItemMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_ITEM_MAX_CHARS");
+                if (!isBlank(todoItemMaxChars)) {
+                    chatMemory.setTaskStateTodoItemMaxChars(parsePositiveInt(
+                            todoItemMaxChars, chatMemory.getTaskStateTodoItemMaxChars()));
                 }
             }
             if (chatMemory.toolResultOffloadEnabled == null) {
@@ -275,6 +381,15 @@ public class OpenManusProperties {
             }
         }
 
+        if (mcp != null) {
+            if (mcp.enabled == null) {
+                String enabled = firstNonBlankEnv("OPENMANUS_MCP_ENABLED");
+                if (!isBlank(enabled)) {
+                    mcp.setEnabled(parseBooleanStrict(enabled, mcp.isEnabled()));
+                }
+            }
+        }
+
         if (legacyMapping != null) {
             if (legacyMapping.warnEnabled == null) {
                 String warnEnabled = firstNonBlankEnv("OPENMANUS_LEGACY_MAPPING_WARN_ENABLED");
@@ -298,11 +413,11 @@ public class OpenManusProperties {
 
     private static String firstNonBlankEnv(String... names) {
         for (String name : names) {
-            String value = System.getenv(name);
+            String value = System.getProperty(name);
             if (!isBlank(value)) {
                 return value.trim();
             }
-            value = System.getProperty(name);
+            value = System.getenv(name);
             if (!isBlank(value)) {
                 return value.trim();
             }
@@ -340,6 +455,20 @@ public class OpenManusProperties {
             return false;
         }
         return fallback;
+    }
+
+    private static List<String> parseCsvList(String value) {
+        if (isBlank(value)) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>();
+        for (String item : value.split(",")) {
+            String trimmed = item == null ? "" : item.trim();
+            if (!trimmed.isEmpty()) {
+                items.add(trimmed);
+            }
+        }
+        return Collections.unmodifiableList(items);
     }
 
     private static boolean shouldApplyChatMemoryFileStoreDirFallback(ChatMemoryConfig chatMemory) {
@@ -386,8 +515,8 @@ public class OpenManusProperties {
         
         @Data
         public static class DefaultLLM {
-            private String model = "qwen3-max-preview";
-            private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/";
+            private String model = "gpt-5.4";
+            private String baseUrl = "https://api.openai.com/v1";
             private String apiType = "openai";
             private Double temperature = 0.7;
             private Integer maxTokens = 8192;
@@ -481,6 +610,19 @@ public class OpenManusProperties {
          */
         private String serperEndpoint = "https://google.serper.dev/search";
     }
+
+    /**
+     * Web proxy exposure configuration.
+     */
+    @Data
+    public static class WebProxyConfig {
+        private Boolean enabled;
+        private List<String> allowedOrigins = List.of();
+
+        public boolean isEnabled() {
+            return Boolean.TRUE.equals(enabled);
+        }
+    }
     
     /**
      * Runflow configuration
@@ -509,9 +651,15 @@ public class OpenManusProperties {
         private static final int DEFAULT_MODEL_CONTEXT_MAX_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_TOTAL_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_APPROX_TOKENS = 128000;
+        private static final String DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE = "approx";
         private static final int DEFAULT_REACT_MAX_ITERATIONS = 0;
         private static final int DEFAULT_REACT_MAX_EXECUTION_SECONDS = 0;
         private static final int DEFAULT_REACT_REPEATED_TOOL_CALL_THRESHOLD = 0;
+        private static final int DEFAULT_TASK_STATE_PLAN_MAX_CHARS = 240;
+        private static final int DEFAULT_TASK_STATE_IN_PROGRESS_MAX_CHARS = 120;
+        private static final int DEFAULT_TASK_STATE_LAST_FAILURE_MAX_CHARS = 240;
+        private static final int DEFAULT_TASK_STATE_TODO_MAX_ITEMS = 6;
+        private static final int DEFAULT_TASK_STATE_TODO_ITEM_MAX_CHARS = 120;
         private static final boolean DEFAULT_TOOL_RESULT_OFFLOAD_ENABLED = true;
         private static final int DEFAULT_TOOL_RESULT_OFFLOAD_MIN_CHARS = 12000;
         private static final int DEFAULT_TOOL_RESULT_OFFLOAD_HEAD_CHARS = 240;
@@ -568,6 +716,11 @@ public class OpenManusProperties {
          */
         private Integer modelContextMaxApproxTokens = null;
         /**
+         * Token-count mode used by model-context budget.
+         * Supported values: approx | tokenizer.
+         */
+        private String modelContextTokenCountMode = "";
+        /**
          * Whether to compact large tool results before persisting into long-term chat memory.
          * Default false to keep full message continuity.
          */
@@ -585,6 +738,26 @@ public class OpenManusProperties {
          * 0 means disabled.
          */
         private Integer reactRepeatedToolCallThreshold = null;
+        /**
+         * Max chars for task-state plan field in context card.
+         */
+        private Integer taskStatePlanMaxChars = null;
+        /**
+         * Max chars for task-state in-progress field in context card.
+         */
+        private Integer taskStateInProgressMaxChars = null;
+        /**
+         * Max chars for task-state last-failure field in context card.
+         */
+        private Integer taskStateLastFailureMaxChars = null;
+        /**
+         * Max todo items allowed in task-state context card.
+         */
+        private Integer taskStateTodoMaxItems = null;
+        /**
+         * Max chars for each todo item in task-state context card.
+         */
+        private Integer taskStateTodoItemMaxChars = null;
         /**
          * Whether to offload very large tool results into external artifact storage (lossless).
          * Chat memory only keeps a compact index card when enabled.
@@ -671,6 +844,14 @@ public class OpenManusProperties {
                     : modelContextMaxApproxTokens;
         }
 
+        public String getModelContextTokenCountMode() {
+            return normalizeModelContextTokenCountMode(modelContextTokenCountMode);
+        }
+
+        String getModelContextTokenCountModeRaw() {
+            return modelContextTokenCountMode;
+        }
+
         public int getReactMaxIterations() {
             return reactMaxIterations == null
                     ? DEFAULT_REACT_MAX_ITERATIONS
@@ -687,6 +868,36 @@ public class OpenManusProperties {
             return reactRepeatedToolCallThreshold == null
                     ? DEFAULT_REACT_REPEATED_TOOL_CALL_THRESHOLD
                     : reactRepeatedToolCallThreshold;
+        }
+
+        public int getTaskStatePlanMaxChars() {
+            return taskStatePlanMaxChars == null
+                    ? DEFAULT_TASK_STATE_PLAN_MAX_CHARS
+                    : taskStatePlanMaxChars;
+        }
+
+        public int getTaskStateInProgressMaxChars() {
+            return taskStateInProgressMaxChars == null
+                    ? DEFAULT_TASK_STATE_IN_PROGRESS_MAX_CHARS
+                    : taskStateInProgressMaxChars;
+        }
+
+        public int getTaskStateLastFailureMaxChars() {
+            return taskStateLastFailureMaxChars == null
+                    ? DEFAULT_TASK_STATE_LAST_FAILURE_MAX_CHARS
+                    : taskStateLastFailureMaxChars;
+        }
+
+        public int getTaskStateTodoMaxItems() {
+            return taskStateTodoMaxItems == null
+                    ? DEFAULT_TASK_STATE_TODO_MAX_ITEMS
+                    : taskStateTodoMaxItems;
+        }
+
+        public int getTaskStateTodoItemMaxChars() {
+            return taskStateTodoItemMaxChars == null
+                    ? DEFAULT_TASK_STATE_TODO_ITEM_MAX_CHARS
+                    : taskStateTodoItemMaxChars;
         }
 
         public boolean isToolResultOffloadEnabled() {
@@ -758,6 +969,12 @@ public class OpenManusProperties {
             this.modelContextMaxApproxTokens = clampNonNegativeOrNull(modelContextMaxApproxTokens);
         }
 
+        public void setModelContextTokenCountMode(String modelContextTokenCountMode) {
+            this.modelContextTokenCountMode = modelContextTokenCountMode == null
+                    ? ""
+                    : modelContextTokenCountMode.trim();
+        }
+
         public void setReactMaxIterations(Integer reactMaxIterations) {
             this.reactMaxIterations = clampNonNegativeOrNull(reactMaxIterations);
         }
@@ -768,6 +985,26 @@ public class OpenManusProperties {
 
         public void setReactRepeatedToolCallThreshold(Integer reactRepeatedToolCallThreshold) {
             this.reactRepeatedToolCallThreshold = clampNonNegativeOrNull(reactRepeatedToolCallThreshold);
+        }
+
+        public void setTaskStatePlanMaxChars(Integer taskStatePlanMaxChars) {
+            this.taskStatePlanMaxChars = clampPositiveOrNull(taskStatePlanMaxChars);
+        }
+
+        public void setTaskStateInProgressMaxChars(Integer taskStateInProgressMaxChars) {
+            this.taskStateInProgressMaxChars = clampPositiveOrNull(taskStateInProgressMaxChars);
+        }
+
+        public void setTaskStateLastFailureMaxChars(Integer taskStateLastFailureMaxChars) {
+            this.taskStateLastFailureMaxChars = clampPositiveOrNull(taskStateLastFailureMaxChars);
+        }
+
+        public void setTaskStateTodoMaxItems(Integer taskStateTodoMaxItems) {
+            this.taskStateTodoMaxItems = clampPositiveOrNull(taskStateTodoMaxItems);
+        }
+
+        public void setTaskStateTodoItemMaxChars(Integer taskStateTodoItemMaxChars) {
+            this.taskStateTodoItemMaxChars = clampPositiveOrNull(taskStateTodoItemMaxChars);
         }
 
         public void setToolResultOffloadMinChars(Integer toolResultOffloadMinChars) {
@@ -806,6 +1043,39 @@ public class OpenManusProperties {
                 return null;
             }
             return value < 0 ? 0 : value;
+        }
+
+        private static String normalizeModelContextTokenCountMode(String value) {
+            if (value == null || value.isBlank()) {
+                return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
+            }
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if ("tokenizer".equals(normalized)) {
+                return normalized;
+            }
+            return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
+        }
+    }
+
+    /**
+     * MCP runtime configuration.
+     */
+    @Data
+    public static class McpConfig {
+        private static final boolean DEFAULT_ENABLED = false;
+
+        /**
+         * Whether MCP tools are allowed to enter the main agent toolchain.
+         * Disabled by default in the current stage.
+         */
+        private Boolean enabled = null;
+
+        public boolean isEnabled() {
+            return enabled == null ? DEFAULT_ENABLED : Boolean.TRUE.equals(enabled);
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled == null ? null : Boolean.TRUE.equals(enabled);
         }
     }
 

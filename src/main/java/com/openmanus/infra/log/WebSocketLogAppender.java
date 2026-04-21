@@ -37,7 +37,7 @@ public class WebSocketLogAppender extends AppenderBase<ILoggingEvent> {
                 return;
             }
 
-            LogRelayService service = LogRelayService.getInstance();
+            LogRelayService service = LogRelayBridge.get();
             if (service == null) {
                 return;
             }

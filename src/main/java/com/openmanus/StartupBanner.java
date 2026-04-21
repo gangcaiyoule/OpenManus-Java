@@ -11,11 +11,11 @@ import org.springframework.stereotype.Component;
 public class StartupBanner implements CommandLineRunner {
 
     @Override
-    public void run(String... args) throws Exception {
+    public void run(String... args) {
         System.out.println();
         System.out.println("╭────────────────────────────────────────────────────────────╮");
         System.out.println("│                     OpenManusJava                          │");
-        System.out.println("│                  智能思考系统启动成功!                        ｜");
+        System.out.println("│                  智能思考系统启动成功!                        │");
         System.out.println("╰────────────────────────────────────────────────────────────╯");
         System.out.println();
         System.out.println("🌐 Web界面: http://localhost:8089");
@@ -26,7 +26,7 @@ public class StartupBanner implements CommandLineRunner {
         System.out.println("   🔍 慢思考模式 - 深度思考，适合复杂任务");
         System.out.println("   🤖 自动模式 - 智能选择最佳思考模式");
         System.out.println();
-        System.out.println("☕ 基于 Java 21 + Spring Boot 3.2.0 + LangChain4j");
+        System.out.println("☕ 基于 Java 21 + Spring Boot 3.2.0 + OpenManus AI Framework");
         System.out.println("╰────────────────────────────────────────────────────────────╯");
     }
 } 
