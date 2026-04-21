@@ -1,6 +1,7 @@
 package com.openmanus.aiframework.parser;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.openmanus.aiframework.exception.AiFrameworkException;
 import com.openmanus.aiframework.model.AiProviderType;
 import com.openmanus.aiframework.model.ChatResponseEnvelope;
 import com.openmanus.aiframework.model.ProviderStreamChunk;
@@ -12,9 +13,13 @@ public class OpenAiResponseParser implements ProviderResponseParser {
 
     @Override
     public ChatResponseEnvelope parse(JsonNode root) {
+        JsonNode error = root == null ? null : root.path("error");
+        if (error != null && error.isObject() && !error.isEmpty()) {
+            throw new AiFrameworkException("Provider returned error payload: " + summarizeError(error));
+        }
         JsonNode choice = first(root.path("choices"));
         JsonNode message = choice.path("message");
-        String content = message.path("content").asText("");
+        String content = extractContent(message.path("content"));
         List<JsonNode> toolCalls = collectArray(message.path("tool_calls"));
 
         return ChatResponseEnvelope.builder()
@@ -33,6 +38,10 @@ public class OpenAiResponseParser implements ProviderResponseParser {
             return ProviderStreamChunk.builder()
                     .completed(true)
                     .build();
+        }
+        JsonNode error = chunk.path("error");
+        if (error.isObject() && !error.isEmpty()) {
+            throw new AiFrameworkException("Provider returned error payload: " + summarizeError(error));
         }
 
         // Responses API style events (e.g. response.output_text.delta / response.completed)
@@ -93,5 +102,49 @@ public class OpenAiResponseParser implements ProviderResponseParser {
             node.forEach(list::add);
         }
         return list;
+    }
+
+    private String extractContent(JsonNode contentNode) {
+        if (contentNode == null || contentNode.isMissingNode() || contentNode.isNull()) {
+            return "";
+        }
+        if (contentNode.isTextual()) {
+            return contentNode.asText("");
+        }
+        if (!contentNode.isArray()) {
+            return contentNode.asText("");
+        }
+
+        StringBuilder content = new StringBuilder();
+        for (JsonNode item : contentNode) {
+            if (item == null || item.isNull()) {
+                continue;
+            }
+            String text = item.path("text").asText("");
+            if (text.isBlank() && item.path("text").isObject()) {
+                text = item.path("text").path("value").asText("");
+            }
+            if (!text.isBlank()) {
+                content.append(text);
+            }
+        }
+        return content.toString();
+    }
+
+    private String summarizeError(JsonNode error) {
+        String message = error.path("message").asText("");
+        String type = error.path("type").asText("");
+        String code = error.path("code").asText("");
+        List<String> parts = new ArrayList<>();
+        if (!type.isBlank()) {
+            parts.add("type=" + type);
+        }
+        if (!code.isBlank()) {
+            parts.add("code=" + code);
+        }
+        if (!message.isBlank()) {
+            parts.add("message=" + message);
+        }
+        return parts.isEmpty() ? error.toString() : String.join(", ", parts);
     }
 }
