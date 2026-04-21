@@ -48,7 +48,7 @@ Expected:
 ## 3) Run migration regression tests
 
 ```bash
-./scripts/mvnw-local.sh -q -Dtest=SingleAgentArchitectureGuardTest,ValidationScriptsConsistencyTest,MvnwLocalScriptIntegrationTest,UnifiedWorkflowTest,AgentControllerStreamEndpointTest,AgentControllerServiceContractTest,AgentServiceConversationMemoryTest,WorkflowStreamServiceSessionMemoryTest,FileToolSandboxTest,PythonToolSandboxPathTest,LangChain4jConfigChatMemoryTest test
+./scripts/mvnw-local.sh -q -Dtest=SingleAgentArchitectureGuardTest,ValidationScriptsConsistencyTest,MvnwLocalScriptIntegrationTest,UnifiedWorkflowTest,AgentControllerStreamEndpointTest,AgentControllerServiceContractTest,AgentServiceConversationMemoryTest,WorkflowStreamServiceSessionMemoryTest,FileToolSandboxTest,PythonToolSandboxPathTest,RuntimeChatMemoryProviderTest test
 ```
 
 Expected:
@@ -57,12 +57,13 @@ Expected:
 - `WorkflowStreamServiceSessionMemoryTest`: session id is forwarded to unified workflow memory.
 - `FileToolSandboxTest`: read/write works in session sandbox; `../` traversal is blocked; files are isolated across sessions.
 - `PythonToolSandboxPathTest`: python file is read from session sandbox; traversal is blocked.
-- `LangChain4jConfigChatMemoryTest`: same conversation id keeps message history across provider fetches.
+- `RuntimeChatMemoryProviderTest`: same conversation id keeps message history across provider fetches.
 - `AgentControllerStreamEndpointTest`: unified streaming endpoint is available; removed legacy path returns `404`; unified endpoint keeps stable error mapping behavior.
 - `AgentControllerServiceContractTest`: verifies real service->controller contract for `errorCode -> HTTP status` (`400/503/500`) on unified path, including `INTERNAL_ERROR -> 500` (listener-registration failure), verifies that `errorCode` takes precedence over legacy `error` message when both exist but conflict, and additionally verifies controller fallback mapping for `UNKNOWN_ERROR -> 500`.
 - `SingleAgentArchitectureGuardTest`: legacy multi-agent classes/config/workflow remain absent.
 - `ValidationScriptsConsistencyTest`: validates `validate-single-agent.sh` and `mvnw-local.sh` stay consistent with script entrypoint and safe `JAVA_HOME` inference rules.
 - `MvnwLocalScriptIntegrationTest`: executes `mvnw-local.sh` in isolated temp directories to verify argument pass-through, invalid `JAVA_HOME` failure behavior, and no `/usr` fallback when canonical-path resolution is unavailable.
+- `validate-single-agent.sh` removes `target/test-classes` before regression tests to avoid stale deleted test classes being executed as false positives.
 - `validate-single-agent.sh` retries regression tests once only when Maven reports transient surefire bootstrap error (`Unable to access jarfile .../surefirebooter-*.jar`), clears `target/surefire` before retry, and preserves `target/surefire-reports` for diagnostics.
 - if the retry still fails, inspect `target/surefire-reports` from the first attempt for root-cause details.
 - retry flow logs stable CI tags for signature match, cleanup, retry start, and retry completion: `VALIDATE_RETRY_SIGNATURE_MATCHED`, `VALIDATE_RETRY_CLEANUP`, `VALIDATE_RETRY_STARTED`, `VALIDATE_RETRY_COMPLETED`.
@@ -161,5 +162,4 @@ Expected:
 
 ## Notes
 
-- `pom.xml` excludes `src/test/java/com/openmanus/java/adaptiverag/**` from test compilation because those are optional experimental tests with undeclared dependencies and unrelated to this migration.
 - rollout and rollback execution details are documented in `docs/SINGLE_AGENT_ROLLOUT.md`.

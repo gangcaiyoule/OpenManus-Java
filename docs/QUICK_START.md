@@ -14,7 +14,7 @@
 
 ### 2.1. API 密钥配置
 
-项目运行需要一些外部服务的 API 密钥。我们使用 `.env` 文件来管理这些密钥，以确保安全。
+项目运行需要一些外部服务的环境变量。我们使用 `.env` 文件来管理这些配置。
 
 1.  **复制 `.env` 文件**:
     在项目根目录下，找到 `dotenv.example` 文件，并复制一份，将其重命名为 `.env`。
@@ -24,46 +24,28 @@
     ```
 
 2.  **编辑 `.env` 文件**:
-    打开 `.env` 文件，填入您自己的 API 密钥。
+    打开 `.env` 文件，填入您自己的模型配置。
 
     ```dotenv
     # -----------------------------------------------------------------------------
-    # API Keys for OpenManus Java
+    # Environment variables for OpenManus Java
     # -----------------------------------------------------------------------------
 
-    # DashScope API Key (必需)
-    # 这是项目默认使用的大语言模型服务。
-    # 获取地址: https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key
-    OPENMANUS_LLM_DEFAULT_LLM_API_KEY=your-dashscope-api-key-here
-    # 兼容旧命名（仍支持）：
-    # OPENMANUS_LLM_DEFAULTLLM_APIKEY=your-dashscope-api-key-here
+    # 默认 LLM（必需）
+    OPENMANUS_LLM_DEFAULT_LLM_API_TYPE=openai
+    OPENMANUS_LLM_DEFAULT_LLM_BASE_URL=https://api.openai.com/v1
+    OPENMANUS_LLM_DEFAULT_LLM_API_KEY=your-openai-compatible-api-key-here
+    OPENMANUS_LLM_DEFAULT_LLM_MODEL=gpt-5.4
 
     # Serper API Key (可选)
     # 用于 Agent 的网页搜索功能。
     # 获取地址: https://serper.dev
     SERPER_API_KEY=your-serper-api-key-here
-
-    # OpenAI API Key (可选)
-    # 如果您想切换到 OpenAI 模型，请配置此项。
-    # 获取地址: https://platform.openai.com/api-keys
-    OPENAI_API_KEY=your-openai-api-key-here
     ```
 
     **注意**:
-    - `OPENMANUS_LLM_DEFAULT_LLM_API_KEY` 是项目运行所必需的。
+    - `OPENMANUS_LLM_DEFAULT_LLM_BASE_URL`、`OPENMANUS_LLM_DEFAULT_LLM_API_KEY`、`OPENMANUS_LLM_DEFAULT_LLM_MODEL` 是项目运行所必需的。
     - 其他 API 密钥是可选的，但会影响部分 Agent 功能（如网页搜索）。
-
-### 2.2. 应用配置 (可选)
-
-配置参考文件为 `src/main/resources/application-example.yml`，包含完整的可配置项示例。
-
-如果您需要覆盖某些配置（例如，更换 LLM 模型或修改端口），建议创建一个 `src/main/resources/application-local.yml` 文件，并在其中写入您需要修改的配置。此文件不会被 Git 跟踪，可以避免将个人配置提交到代码库。
-
-启动时使用 local profile 使其生效，例如：
-
-```bash
-mvn spring-boot:run -Dspring-boot.run.profiles=local
-```
 
 ## 3. 启动应用
 
@@ -95,17 +77,14 @@ openmanus-java    | ...  Started WebApplication in ... seconds
 
 如果您不想使用 Docker，也可以直接在本地运行。
 
-1.  **设置环境变量**:
-    确保您的 shell 环境中已经设置了 `.env` 文件中的环境变量。您可以手动 `export`，或者使用 `source .env` 等命令。
-
-2.  **使用 Maven 运行**:
+1.  **使用 Maven 运行**:
     在项目根目录下，运行以下 Maven 命令：
 
     ```bash
     mvn spring-boot:run
     ```
 
-    Maven 会自动编译项目并启动 Spring Boot 应用。
+    应用启动时会自动读取项目根目录 `.env`，然后编译并启动 Spring Boot 应用。
 
 ## 4. 访问应用
 

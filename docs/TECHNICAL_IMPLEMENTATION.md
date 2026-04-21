@@ -2,120 +2,355 @@
 
 ## 1. 当前阶段范围
 
-当前阶段只保留以下实现面：
+当前阶段已完成以下实现面：
 
 1. 上下文治理阶段 A。
 2. CodeAct 阶段 A。
 3. 上下文治理阶段 B 第一切片：工具结果摘要化、卸载索引与按需回填。
+4. 上下文治理阶段 B 第二切片：历史关键记忆卡片。
+5. MCP 工具发现、注册与调用桥接。
 
 当前不进入：
 
-- 上下文治理阶段 B 后续切片 / C。
+- 上下文治理阶段 B 后续切片中的"结构化重要事实提炼"与阶段 C。
 - MCP 资源融合。
 - `Multi-Agent` 默认实现面。
+
+当前阶段下一步：
+
+- 代码结构精简（以 `agent/context` 包为主，消除职责重叠和代码重复）。
 
 当前阶段完成标准：
 
 1. 单 Agent 最小链路稳定。
 2. `./scripts/mvnw-local.sh -q -DskipTests compile` 通过。
 3. `./scripts/mvnw-local.sh -q -DskipITs test` 通过。
-4. `./scripts/run-live-smoke.sh` 在环境满足时产出 non-skipped 成功结果；环境不满足时允许跳过，不影响阶段持续推进。
+4. `./scripts/run-live-smoke.sh` 在环境满足时产出 non-skipped 成功结果；环境不满足时允许 assumption skip，但必须明确首个真实外部阻塞。
+5. 代码结构精简不引入任何运行时行为变化。
 
 ## 2. 当前有效分层
 
-- `domain` 只保留业务语义与 port。
-- `agent` 负责单 Agent 执行编排、上下文治理、CodeAct 最小闭环。
-- `infra` 负责配置、存储、监控、沙箱、Web 入口与 adapter。
-- `aiframework` 负责模型、消息、工具与 provider 运行时抽象。
+- `domain`：业务语义与 port。
+- `agent`：单 Agent 执行编排、上下文治理、CodeAct 最小闭环。
+- `infra`：配置装配、存储、监控、沙箱、Web 入口与 adapter。
+- `aiframework`：模型、消息、工具与 provider 运行时抽象。
 
 当前必须守住的边界：
 
-- `domain` 不承载 Spring Web / Servlet / 调度 / 条件装配语义。
-- `domain/service` 只通过 port 调工作流、监控、代理与沙箱能力。
-- `agent` 只保留执行编排、上下文治理、工具逻辑与最小任务态，不直接承载 Spring 装配语义。
-- `infra` 负责 `Controller`、配置装配、外部协议适配和运行时细节。
-- `UnifiedWorkflow`、`BrowserTool`、`FileTool`、`PythonTool`、`ReflectionTool`、`SandboxPathResolver` 作为纯执行对象保留在 `agent` 层，实例化与 Bean 注册统一由 `infra/config/UnifiedAgentConfig` 收口。
-- MCP 当前只保留“工具发现 + 工具调用协议转换”；`mcp.resource.read` 不进入当前阶段默认配置、装配与验收面。
+- `domain` 不承载 Spring Web、Servlet、条件装配或运行时协议细节。
+- `domain` 通过 `WorkflowExecutionPort`、`WorkflowExecutionEventPort`、`WorkflowStreamPublisher`、`WebProxyFetchPort`、`SessionSandboxClient` 等 port 表达依赖，不直接引用具体运行时实现。
+- `agent` 不承载 Spring Bean 装配，只保留执行编排、工具逻辑和最小任务态。
+- `infra` 负责 Controller、配置、外部协议适配与运行时实现细节；`DomainServiceConfig` 统一装配 domain service，`infra/web`、`infra/workflow`、`infra/sandbox`、`infra/monitoring` 提供对应 adapter。
+- MCP 当前只覆盖"工具发现 + 工具调用协议转换"，`mcp.resource.read` 不进入当前阶段默认实现和验收面。
+- `X-Session-ID` 的合法性与规范化统一由 `domain.service.SessionIdPolicy` 收口。
+- `/api/agent/chat` 的 `conversationId` 与 `/api/agent/session/{sessionId}` 的会话查询参数都必须复用 `SessionIdPolicy`。
 
-## 3. 当前最小可运行链路
+## 3. 代码文件结构
 
-### 3.1 上下文治理
+### 3.1 总体目录结构
+
+```
+src/main/java/com/openmanus/
+├── StartupBanner.java                      启动横幅
+├── WebApplication.java                     Spring Boot 入口
+│
+├── agent/                                  ← Agent 执行层
+│   ├── base/
+│   │   ├── AbstractAgent.java              (73L)   Agent 基类
+│   │   └── AbstractAgentExecutor.java      (1236L) CodeAct 循环主引擎
+│   ├── context/                            (16 文件, 2426L) 上下文治理
+│   ├── impl/unified/
+│   │   └── UnifiedAgent.java               (98L)   单 Agent 实现
+│   ├── tool/
+│   │   ├── BrowserTool.java                浏览器工具
+│   │   ├── FileTool.java                   文件工具
+│   │   ├── PythonTool.java                 Python 执行工具
+│   │   ├── ReflectionTool.java             反射工具
+│   │   └── support/
+│   │       └── SandboxPathResolver.java    沙箱路径解析
+│   └── workflow/
+│       └── UnifiedWorkflow.java            (47L)   工作流
+│
+├── aiframework/                            ← AI 框架抽象层
+│   ├── api/
+│   │   ├── AiProviderClient.java           Provider 客户端接口
+│   │   └── StreamListener.java             流式监听接口
+│   ├── assembler/
+│   │   ├── ProviderRequestAssembler.java   请求组装接口
+│   │   ├── AbstractProviderRequestAssembler.java  组装基类
+│   │   ├── OpenAiRequestAssembler.java     OpenAI 请求组装
+│   │   ├── AnthropicRequestAssembler.java  Anthropic 请求组装
+│   │   └── GeminiRequestAssembler.java     Gemini 请求组装
+│   ├── client/
+│   │   ├── AbstractAiProviderClient.java   客户端基类
+│   │   ├── OpenAiClient.java              OpenAI 客户端
+│   │   ├── AnthropicClient.java           Anthropic 客户端
+│   │   └── GeminiClient.java              Gemini 客户端
+│   ├── config/
+│   │   └── AiProviderClientRegistry.java   Provider 注册表
+│   ├── exception/
+│   │   └── AiFrameworkException.java       框架异常
+│   ├── model/
+│   │   ├── AiProviderType.java             Provider 类型枚举
+│   │   ├── ChatMessage.java, ChatRequestEnvelope.java
+│   │   ├── ChatResponseEnvelope.java, ChatRequestOptions.java
+│   │   ├── ProviderConfig.java, ProviderStreamChunk.java
+│   ├── parser/
+│   │   ├── ProviderResponseParser.java     响应解析接口
+│   │   ├── OpenAiResponseParser.java       OpenAI 响应解析
+│   │   ├── AnthropicResponseParser.java    Anthropic 响应解析
+│   │   └── GeminiResponseParser.java       Gemini 响应解析
+│   ├── runtime/
+│   │   ├── AiChatModel.java               Chat 模型抽象
+│   │   ├── AiProviderChatModel.java        Provider Chat 实现
+│   │   ├── AiMemory.java / AiMemoryProvider.java / AiMemoryStore.java
+│   │   ├── AiSystemMessageMemory.java
+│   │   ├── AiToolResultArtifactStore.java
+│   │   ├── AiExecutionEvent.java / AiExecutionStatus.java / AiExecutionTracker.java
+│   │   ├── AiCodeSandbox.java / AiCodeExecutionResult.java
+│   │   ├── AiProxyConfig.java / AiSearchConfig.java
+│   │   ├── AiSessionSandboxGateway.java / AiSessionSandboxInfo.java
+│   │   ├── AiVncSandboxClient.java / AiVncSandboxInfo.java
+│   │   ├── AiLegacyMappingPolicy.java / AiLogMarkers.java
+│   │   ├── ToolResultArtifactRef.java
+│   │   ├── model/                          AiChatMessage, AiChatRequest, AiChatResponse, AiToolCall 等
+│   │   └── mcp/                            McpClient, McpTool*, StubMcpClient
+│   ├── tool/
+│   │   ├── AiTool.java, AiParam.java       工具注解
+│   │   ├── AiRegisteredTool.java           已注册工具
+│   │   ├── AiToolRegistry.java             工具注册表
+│   │   ├── AiToolExecutor.java             工具执行器
+│   │   ├── AiToolExecutionRequest.java     工具执行请求
+│   │   └── mcp/
+│   │       ├── McpToolExecutorBridge.java  MCP 工具执行桥
+│   │       ├── McpToolRegistryBootstrap.java  MCP 工具注册引导
+│   │       └── McpToolSpecAdapter.java     MCP 工具规格适配
+│   └── transport/
+│       ├── HttpTransport.java              HTTP 传输
+│       └── SseTransport.java              SSE 传输
+│
+├── domain/                                 ← 业务语义层
+│   ├── model/
+│   │   ├── AgentExecutionEvent.java        执行事件
+│   │   ├── DetailedExecutionFlow.java      详细执行流
+│   │   ├── SessionSandboxInfo.java         沙箱信息
+│   │   ├── WorkflowErrorCodes.java         错误码
+│   │   ├── WorkflowRequest.java / WorkflowResponse.java
+│   │   └── WorkflowResultVO.java
+│   └── service/
+│       ├── AgentService.java               Agent 服务编排
+│       ├── WorkflowStreamService.java      流式工作流服务
+│       ├── ExecutionMonitoringService.java 执行监控
+│       ├── SessionSandboxManager.java      会话沙箱管理
+│       ├── SessionIdPolicy.java            会话 ID 策略
+│       ├── SessionFileSandboxDirectoryProvider.java
+│       ├── SessionSandboxClient.java       沙箱客户端 port
+│       ├── LegacySessionMappingPolicy.java
+│       ├── WebProxyService.java            Web 代理服务
+│       ├── WebProxyConfigProvider.java     代理配置 port
+│       ├── WebProxyFetchPort.java          代理获取 port
+│       ├── WebProxyResult.java             代理结果
+│       ├── WorkflowExecutionPort.java      工作流执行 port
+│       ├── WorkflowExecutionEventPort.java 工作流事件 port
+│       └── WorkflowStreamPublisher.java    流式发布 port
+│
+└── infra/                                  ← 基础设施层
+    ├── config/                             (14 文件)
+    │   ├── AiFrameworkConfig.java          AI 框架配置
+    │   ├── AiRuntimeConfig.java            AI 运行时配置
+    │   ├── DomainServiceConfig.java        Domain 服务装配
+    │   ├── UnifiedAgentConfig.java         统一 Agent 配置
+    │   ├── OpenManusProperties.java        应用属性
+    │   ├── DotenvLoader.java               .env 加载器
+    │   ├── McpRuntimeConfig.java           MCP 运行时配置
+    │   ├── AsyncConfig.java / JacksonConfig.java
+    │   ├── WebMvcConfig.java / WebSocketConfig.java
+    │   ├── MdcInterceptor.java             MDC 拦截器
+    │   ├── RuntimeBrowserConfigAdapter.java
+    │   └── RuntimeLegacyMappingPolicyAdapter.java
+    ├── exception/
+    │   ├── OpenManusException.java
+    │   ├── TokenLimitExceededException.java
+    │   └── ToolErrorException.java
+    ├── log/
+    │   ├── LogMarkers.java / LogRelayBridge.java / LogRelayService.java
+    │   └── WebSocketLogAppender.java
+    ├── memory/
+    │   ├── InMemoryAiMemoryStore.java      内存记忆存储
+    │   ├── PersistentAiMemory.java         持久化记忆
+    │   ├── FileChatMemoryStore.java        文件对话记忆
+    │   ├── AtomicAppendChatMemoryStore.java
+    │   ├── InMemoryToolResultArtifactStore.java
+    │   ├── FileToolResultArtifactStore.java
+    │   ├── RuntimeToolResultArtifactStoreAdapter.java
+    │   └── ToolResultArtifactStore.java
+    ├── monitoring/
+    │   ├── AgentExecutionTracker.java
+    │   ├── ExecutionMonitoringServiceAdapter.java
+    │   ├── RuntimeExecutionTrackerAdapter.java
+    │   ├── WebSocketWorkflowStreamPublisher.java
+    │   └── WorkflowExecutionEventPortAdapter.java
+    ├── sandbox/
+    │   ├── DockerClientManager.java / SandboxClient.java
+    │   ├── RuntimeCodeSandboxAdapter.java
+    │   ├── RuntimeSessionSandboxGatewayAdapter.java
+    │   ├── RuntimeVncSandboxClientAdapter.java / VncSandboxClient.java / VncSandboxInfo.java
+    │   ├── SessionFileSandboxDirectoryProviderAdapter.java
+    │   ├── SessionSandboxClientAdapter.java / SessionSandboxLifecycleManager.java
+    │   └── ExecutionResult.java
+    ├── web/
+    │   ├── AgentController.java             Agent 控制器 (chat/stream/session)
+    │   ├── AgentMonitoringController.java   监控控制器
+    │   ├── WebProxyController.java          Web 代理控制器
+    │   ├── HttpUrlConnectionWebProxyAdapter.java
+    │   ├── WebProxyTargetValidator.java     代理目标校验
+    │   ├── WebSocketHeartbeatController.java
+    │   └── WorkflowStreamResponse.java
+    └── workflow/
+        └── UnifiedWorkflowPortAdapter.java  工作流 port 适配器
+```
+
+### 3.2 上下文治理文件详细结构 (`agent/context/`)
+
+共 16 个源文件，2426 行，按职责分为 4 组：
+
+**核心管道 (4 文件, 571L)**
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `ContextSnapshot` | 64L | 不可变 record，将消息拆分为历史/当前轮视图 |
+| `ContextAssembler` | 129L | 组装编排：历史→当前轮→预算裁剪→压缩→注入任务态 |
+| `ContextBudgetPolicy` | 191L | 消息数量预算，enforce history/total 限制 |
+| `ModelContextBudgeter` | 187L | Token 预算选择器，保系统/用户/工具锚点，再填最新消息 |
+
+**Token 计数 (6 文件, 482L)**
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `ModelContextTokenCounter` | 24L | Token 计数接口 |
+| `ApproxModelContextTokenCounter` | 44L | 近似计数 (char/4) |
+| `TokenizerModelContextTokenCounter` | 115L | Unicode 感知轻量计数（word-piece 估算） |
+| `ModelTokenizerModelContextTokenCounter` | 94L | jtokkit 真实分词计数 |
+| `ModelContextTokenCounterFactory` | 122L | 工厂：模式选择 + 三级 fallback |
+| `ModelTokenizerEncodingMapper` | 83L | 模型名→tokenizer 编码映射 |
+
+**任务态 (4 文件, 447L)**
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `TaskExecutionState` | 167L | 不可变载体：plan/inProgress/todo/lastFailure |
+| `TaskExecutionStateTracker` | 143L | 从助手消息和工具结果追踪状态变迁 |
+| `TaskStateBudgetPolicy` | 65L | 任务态字段预算限制（5 个常量） |
+| `TaskStateContextInjector` | 72L | 渲染 [Task State] 卡片注入上下文 |
+
+**压缩/回填 (3 文件, 926L)**
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `ToolResultContextCompressor` | 315L | 超长工具结果→摘要卡片 + artifact 索引 |
+| `IndexedRehydrateSelector` | 388L | 按需回填 artifact（中英文命中策略） |
+| `HistoricalContextSummarizer` | 223L | 被裁历史→[Historical Key Memory] 卡片 |
+
+## 4. 当前最小可运行链路
+
+### 4.1 上下文治理
 
 - `ContextSnapshot` 拆分历史消息、当前轮消息和当前用户输入。
-- `ContextBudgetPolicy` 统一消息数量与总体积预算。
-- `ContextAssembler` 按“历史 -> 当前轮 -> 总量裁剪”组装模型输入，并在缺少当前轮用户锚点时补回用户消息。
-- `ToolResultContextCompressor` 将超长工具结果压缩为固定卡片。
-- `IndexedRehydrateSelector` 只在显式命中 `artifactId`、工具名或压缩摘要时回填对应 artifact。
-- `TaskExecutionState` 只保留单次执行回路所需的最小任务态卡片。
+- `ContextBudgetPolicy` 与 `ModelContextBudgeter` 统一消息数量、总量与工具结果预算。
+- `ContextAssembler` 按"历史 -> 当前轮 -> 预算裁剪"组装模型输入，并在缺失用户锚点时补回当前用户消息。
+- `HistoricalContextSummarizer` 会把因 history budget 被裁掉的旧历史压缩成一张 `[Historical Key Memory]` 卡片，并插入保留的短期窗口前部，形成"短期窗口 + 关键记忆"混合上下文。
+- `ToolResultContextCompressor` 将超长工具结果压缩为摘要卡片。
+- `IndexedRehydrateSelector` 只在显式命中 `artifactId`、工具名或摘要信号时回填 artifact。
+- `TaskExecutionState`、`TaskExecutionStateTracker`、`TaskStateContextInjector` 只保留单次执行回路需要的最小任务态。
 
-### 3.2 CodeAct 最小闭环
+### 4.2 CodeAct 最小闭环
 
-- `AbstractAgentExecutor` 负责“计划 -> 执行工具 -> 观察结果 -> 调整计划”的单轮循环。
+- `AbstractAgentExecutor` 负责"计划 -> 执行工具 -> 观察结果 -> 调整计划"的最小循环。
 - 本地工具与 MCP 工具统一通过工具注册机制接入。
-- `McpToolRegistryBootstrap` 当前只发现并注册 MCP tools，不再在阶段内额外合成 `mcp.resource.read` 工具。
-- 工具结果统一写回对话上下文；超长结果优先走“摘要卡片 + artifact”路径。
-- OpenAI-compatible 主链路统一收口同步 / 流式空响应和上游错误语义。
+- 工具结果统一写回对话上下文；超长结果优先走"摘要卡片 + artifact"路径。
+- OpenAI-compatible 主链路统一收口同步、流式空响应和上游错误语义。
+- `UnifiedWorkflowPortAdapter` 负责把 `agent` 执行链路适配到 `domain` 的 `WorkflowExecutionPort`，`AgentService` 与 `WorkflowStreamService` 只编排执行、监控与流式发布，不直接依赖具体 Agent 实现。
 
-### 3.3 工具结果摘要化、卸载与回填
+### 4.3 工具结果摘要化、卸载与回填
 
-- 超长工具结果落到 `AiToolResultArtifactStore`，对话上下文只保留索引卡片。
-- 模型输入侧对超长工具结果注入 `[Tool Result Context Compressed]` 卡片。
-- 回填结果统一以 `TOOL` 观察消息注入，并继续受单条上限、单轮上限和总量预算约束。
+- 超长工具结果写入 `AiToolResultArtifactStore`，对话上下文只保留索引卡片。
+- 模型输入侧只注入压缩后的 `[Tool Result Context Compressed]` 卡片。
+- 压缩卡片摘要命中规则保持"中文按原文片段命中，英文按 token 边界命中"，避免 `port -> report` 这类英文子串误触发 artifact 回填。
+- 回填内容统一以 `TOOL` 观察消息注入，并继续受单条、单轮和总量预算约束。
 
-### 3.4 Live Smoke 口径
+### 4.4 Live Smoke 口径
 
 - 默认验收只看 OpenAI-compatible 主链路。
-- 默认 `test` 不直接执行外部 live smoke；仅 `./scripts/run-live-smoke.sh` 显式触发。
-- `./scripts/mvnw-local.sh` 在执行 `test` 前清理历史 `target/surefire-reports`，确保默认测试证据不继承旧的 live smoke 失败产物。
-- 应用运行时默认 LLM 只接受 `OPENMANUS_LLM_DEFAULT_LLM_*` 与兼容 `OPENAI_*` 回填；`OPENMANUS_LIVE_*` 只作为 `run-live-smoke.sh` 的验收输入，不进入应用默认主链路。
-- 应用内环境回填统一按 `JVM system properties -> process env` 取首个非空值，确保 `.env`/测试注入的系统属性优先于宿主机环境变量，且不改变 `OPENMANUS_LIVE_*` 与默认运行时的边界。
-- live smoke 显式触发使用独立系统属性 `-Dopenmanus.liveSmoke.enabled=true` 作为二次门禁，避免与 Surefire `groups/excludedGroups` 机制相互干扰。
-- 当 shell 中未显式导出 `OPENMANUS_LIVE_*` / `OPENMANUS_LLM_DEFAULT_LLM_*` / `OPENAI_*` 时，`run-live-smoke.sh` 先加载 `.env`，再按 `OPENMANUS_LIVE_* -> OPENMANUS_LLM_DEFAULT_LLM_* -> OPENAI_*` 回填生效配置。
-- `run-live-smoke.sh` 执行前输出脱敏后的生效配置摘要，只显示模型列表、`base URL` 与 `api key` 长度/尾缀。
-- OpenAI-compatible live smoke 候选按 `OPENMANUS_LIVE_* -> OPENMANUS_LLM_DEFAULT_LLM_* -> OPENAI_*` 取首个有效层级；层内合并 `MODEL + MODEL_CANDIDATES` 并去重，不跨层混合。
-- 若未显式提供任何模型/候选，则回退到 `gpt-5.4,gpt-5,gpt-4o`。
-- 当网关 TLS 证书链不在当前 JVM 默认信任集中时，可显式提供 `OPENMANUS_LIVE_CA_CERT_FILE` 指向 PEM 证书链；脚本会导入临时 `PKCS12 truststore` 并通过 `JAVA_TOOL_OPTIONS` 注入给 live smoke 进程，不放宽 TLS 校验。
-- 外部网关、证书链或凭证不满足时，live smoke 直接按跳过处理，不影响当前阶段持续推进。
-- `401 unauthorized`、`402 insufficient_quota/insufficient_balance`、`invalid api key`、`无效的令牌`、`model_not_found`、`No available channel for model` 这类确定性错误不在同一候选上盲重试。
-- 其中 `401/402/invalid api key/invalid token/insufficient_balance` 视为候选无关的外部凭证或配额失败，首个候选命中后直接停止剩余候选探测；`model_not_found`、`No available channel for model` 仍只终止当前候选，允许切到下一个候选继续验证。
+- 默认 `test` 不执行 live smoke；仅 `./scripts/run-live-smoke.sh` 显式触发。
+- live smoke 生效配置按 `OPENMANUS_LIVE_* -> OPENMANUS_LLM_DEFAULT_LLM_* -> OPENAI_*` 收敛，且不回灌到应用默认运行时。
+- 当 TLS 证书链不在 JVM 默认信任集中时，可通过 `OPENMANUS_LIVE_CA_CERT_FILE` 为 live smoke 进程注入临时 truststore。
+- 外部网关、证书链、余额额度或凭证环境不满足时，live smoke 允许 skip，不把问题回推成应用默认主链路改造。
 
-## 4. 当前验证口径
+## 5. 代码结构精简计划
+
+### 5.1 背景
+
+`agent/context` 包在阶段 B 两个切片演进过程中自然积累了 16 个源文件。在进入阶段 C 或更多功能前，应精简代码结构以保持可维护性。
+
+### 5.2 精简范围与优先级
+
+**P0 — Token 计数层精简 (6→3 文件)**
+
+| 操作 | 说明 | 预期减少 |
+|------|------|----------|
+| 合并 `TokenizerModelContextTokenCounter` → `ApproxModelContextTokenCounter` | 两者都是估算实现，合并为统一的估算公式 | -115L, -1 文件 |
+| `ModelTokenizerEncodingMapper` 内联到 `ModelTokenizerModelContextTokenCounter` | 唯一调用方就是它 | -83L, -1 文件 |
+
+**P1 — 消除重复代码**
+
+| 操作 | 说明 | 预期减少 |
+|------|------|----------|
+| `ContextBudgetPolicy` + `ModelContextBudgeter` 提取共享工具方法 | `findMessageIndex`, `findLatestToolResultMessage`, `tail`, `sanitize` 约 60L 重复 | -60L |
+| `TaskStateBudgetPolicy` 合并到 `TaskExecutionState` | 本质只是 5 个常量 + getter | -65L, -1 文件 |
+
+**P2 — 构造器精简**
+
+| 操作 | 说明 | 预期减少 |
+|------|------|----------|
+| `ContextAssembler` 只保留全参构造函数 | Spring 管理不需要多个构造函数 | -20L |
+
+### 5.3 精简约束
+
+- 不改变任何运行时行为和外部可观测语义。
+- 每步精简后执行完整测试套件 (`mvnw-local.sh -q -DskipITs test`) 确认无回归。
+- 精简过程中如果发现需要调整测试，一并调整。
+- 精简完成后重新执行完整验收口径。
+
+## 6. 当前验证口径
 
 当前必须覆盖：
 
-- 上下文组装、预算、压缩与回填主流程、分支、异常和边界。
-- `AgentService` / `WorkflowStreamService` 主流程、监控收口与异常边界。
-- `AgentController` 统一流式入口的成功路径、状态码映射，以及“成功返回但缺失 `sessionId`”的协议异常边界。
-- Web 代理输入校验、重定向校验、响应头过滤与装配开关。
+- 上下文组装、预算、历史关键记忆卡片、压缩、artifact 索引与按需回填的主流程、分支、异常和边界。
+- `AgentService`、`WorkflowStreamService` 的主流程、异步异常边界和监控收口。
+- `AgentController` 统一流式入口、状态码映射、协议异常边界，以及 `/api/agent/chat` 在输入校验失败时只回显合法 `conversationId` 的安全边界。
+- `AgentController` 的会话查询入口必须覆盖合法会话 ID、空白规范化、非法字符拒绝和"不命中沙箱信息时仅返回会话 ID"的边界。
+- Web 代理输入校验、上游错误脱敏、响应头过滤与装配开关。
+- 监控控制器非法参数、脏数据与查询失败分支。
 - 会话级沙箱编排、状态刷新、销毁与安全边界。
-- 会话级沙箱状态刷新失败时保留缓存快照，避免探测异常打断查询链路。
-- `.env` / live smoke 脚本回填、候选模型解析与默认测试门禁。
-- `./scripts/mvnw-local.sh` 对 Java 21 运行前置校验、降级 `JAVA_HOME` 回退和 surefire 清理门禁。
-- 架构守卫，确保 `domain -> port -> infra adapter` 分层不回退，并覆盖 `agent` 层不得混入 Spring 装配语义。
-- MCP 当前阶段只验证工具发现、注册、调用与重名冲突；不再把 `mcp.resource.read` 作为阶段内默认回归项。
+- `.env` 与 live smoke 脚本的配置回填、候选模型解析与默认测试门禁。
+- 架构守卫，确保 `domain`、`agent`、`infra`、`aiframework` 分层不回退。
+- MCP 当前阶段只验证工具发现、注册、调用与重名冲突。
 
-当前有效测试集合主覆盖由以下测试簇承担：
+当前默认复验入口：
 
-- 上下文治理：`ContextSnapshotTest`、`ContextBudgetPolicyTest`、`ContextAssemblerTest`、`ToolResultContextCompressorTest`、`IndexedRehydrateSelectorTest`、`TaskExecutionStateTest`、`TaskExecutionStateTrackerTest`、`TaskStateContextInjectorTest`。
-- Agent 主链路：`AbstractAgentExecutorChatMemoryIntegrationTest`、`AbstractAgentExecutorTaskStateIntegrationTest`、`AbstractAgentExecutorMcpIntegrationTest`、`AbstractAgentExecutorRuntimeEntryTest`、`UnifiedWorkflowTest`。
-- OpenAI-compatible 与 live smoke 边界：`HttpTransportTest`、`SseTransportTest`、`OpenAiResponseParserTest`、`LiveSmokeEnvTest`、`OpenAiClientLiveSmokeTestTest`、`LiveSmokeScriptIntegrationTest`、`LiveSmokeTestContractTest`。
-- Domain / Infra 边界：`AgentServiceConversationMemoryTest`、`AgentServiceMonitoringIntegrationTest`、`WorkflowStreamServiceSessionMemoryTest`、`WorkflowStreamServiceMonitoringIntegrationTest`、`AgentControllerStreamEndpointTest`、`AgentControllerServiceContractTest`、`AgentControllerSessionInfoTest`、`WebProxyControllerTest`、`WebProxyControllerConditionTest`、`WebProxyServiceTest`、`SessionSandboxManagerLifecycleTest`、`SessionSandboxManagerSecurityTest`、`SingleAgentArchitectureGuardTest`。
-- 装配与边界守卫：`UnifiedAgentConfigBeanWiringTest`、`UnifiedAgentConfigRuntimeEntryDelegationTest`、`Step2UnifiedAgentConfigRuntimeBehaviorTest`、`McpRuntimeConfigWiringTest`、`SingleAgentArchitectureGuardTest`。
+- `./scripts/mvnw-local.sh -q -DskipTests compile`
+- `./scripts/mvnw-local.sh -q -DskipITs test`
+- `./scripts/run-live-smoke.sh`
 
-## 5. 当前复验结果
+## 7. 最新复验结果
 
-- 截至 `2026-04-14`，`./scripts/mvnw-local.sh -q -DskipTests compile` 与 `./scripts/mvnw-local.sh -q -DskipITs test` 已通过；仓内默认验证入口继续满足当前阶段要求。
-- 截至 `2026-04-14`，任务态上下文分支已补齐当前阶段边界覆盖：`TaskExecutionStateTrackerTest` 新增“缺失 assistant 计划消息”、“空白 assistant 计划不清空既有 plan”、“超短失败预算裁剪”分支，`TaskStateContextInjectorTest` 新增“缺失 baseMessages”与“任务态字段兜底为 `n/a`”边界。
-- 截至 `2026-04-14`，`OpenManusProperties` 默认回填仍保持“系统属性优先、宿主环境兜底”，默认运行时不再受宿主机 `OPENAI_*` 环境污染，`OPENMANUS_LIVE_*` 仍不进入应用默认主链路。
-- 截至 `2026-04-14`，`./scripts/run-live-smoke.sh` 最新实测结果为 `tests=1, failures=0, errors=0, skipped=1`；当前首个有效阻塞已更新为外部兼容网关握手阶段失败 `Remote host terminated the handshake`。
-- 在握手问题消除前，不继续假设 live smoke 一定会前移到证书链、鉴权或余额/配额问题；外部验收结论始终以最新一次实测结果为准。
-- 当前脚本与回归测试仍只负责保证 live smoke 的候选模型收敛、环境回填、显式门禁与确定性错误停止策略，不因外部环境未闭环而扩写阶段内实现面。
+- `2026-04-21` 已再次实际复验 `./scripts/mvnw-local.sh -q -DskipTests compile`，结果通过。
+- `2026-04-21` 已在接入"历史关键记忆卡片"后再次实际复验 `./scripts/mvnw-local.sh -q -DskipITs test`，结果通过，汇总结果为 `tests=728, failures=0, errors=0, skipped=0`。
+- `2026-04-21` 已再次实际复验 `./scripts/run-live-smoke.sh`，结果为 `tests=1, failures=0, errors=0, skipped=0`。
+- 本轮实际 live smoke 生效配置为显式 `OPENMANUS_LIVE_*`：`models=glm-5.1`、`baseUrl=https://ruoli.dev/v1`，未依赖 `OPENMANUS_LLM_DEFAULT_LLM_*` 或 `OPENAI_*` 回退。
 
-## 6. 当前收口判断
+## 8. 当前收口判断
 
-- 当前主链路编译、默认测试、分层与守卫测试维持在既定阶段目标内，`mcp.resource.read` 已进一步退出当前阶段默认工具注册与测试维护面，阶段边界重新与 `AGENTS.md` 和开发目标对齐。
-- `agent` / `infra` 分层已按当前阶段目标收口；`agent` 层不再承载 Spring 装配语义，且已有源码级守卫防回退。
-- 控制器测试目录已收口到 `src/test/java/com/openmanus/infra/web/`，测试目录层级与主代码 Web 入口归属保持一致。
-- 应用默认运行时与 live smoke 脚本配置边界已收口，`OPENMANUS_LIVE_*` 不再渗透进应用默认主链路。
-- 默认 `compile` / `test` 入口已同时具备 Java 21 版本自检与历史 surefire 报告清理，默认复验证据与外部 live smoke 证据边界清晰。
-- 当前剩余验收缺口只在外部 live smoke non-skipped 成功证据；当前首个有效阻塞是远端握手终止，需先消除此入口问题，再判断是否出现新的证书链、鉴权或余额/配额类阻塞。
+- 当前阶段代码实现、默认测试和分层守卫与 `AGENTS.md`、`DEVELOPMENT_GOALS.md` 保持一致。
+- 默认 `compile` 与 `test` 已满足当前阶段仓库内主线基线，`live smoke` 也已拿到 non-skipped 成功证据；阶段 B 两个切片均已形成可回归验证的最小闭环。
+- 下一步将进行代码结构精简，以 `agent/context` 包为主，精简后再评估是否进入阶段 C、MCP 资源融合或 Multi-Agent。
