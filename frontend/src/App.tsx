@@ -23,13 +23,13 @@ export default function App(): JSX.Element {
   const statusText = useMemo(() => {
     switch (state.connectionStatus) {
       case 'connecting':
-        return '连接中';
+        return 'Connecting';
       case 'connected':
-        return '已连接';
+        return 'Connected';
       case 'error':
-        return '连接异常';
+        return 'Connection Error';
       default:
-        return '待命';
+        return 'Idle';
     }
   }, [state.connectionStatus]);
 
@@ -60,7 +60,7 @@ export default function App(): JSX.Element {
       const sessionId = startData.sessionId || '';
       const topic = startData.topic || '';
       if (sessionId.length === 0 || topic.length === 0) {
-        throw new ApiError('后端未返回可订阅主题');
+        throw new ApiError('Backend did not return a subscribable topic');
       }
 
       dispatch({ type: 'SET_STREAM', payload: { sessionId, topic } });
@@ -90,7 +90,7 @@ export default function App(): JSX.Element {
         }
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '发送失败';
+      const message = error instanceof Error ? error.message : 'Send failed';
       dispatch({ type: 'SET_ERROR', payload: message });
       dispatch({ type: 'SET_LOADING', payload: false });
       dispatch({ type: 'SET_STATUS', payload: 'error' });
@@ -122,7 +122,7 @@ export default function App(): JSX.Element {
 
   async function reconnect(): Promise<void> {
     if (state.topic === null || state.topic.length === 0) {
-      dispatch({ type: 'SET_ERROR', payload: '没有可重连的会话' });
+      dispatch({ type: 'SET_ERROR', payload: 'No reconnectable session found' });
       return;
     }
     try {
@@ -156,7 +156,7 @@ export default function App(): JSX.Element {
       });
     } catch (error) {
       dispatch({ type: 'SET_STATUS', payload: 'error' });
-      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : '重连失败' });
+      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Reconnection failed' });
     }
   }
 
@@ -182,22 +182,22 @@ export default function App(): JSX.Element {
         <div className="nav-actions">
           <span className="status-tag">{statusText}</span>
           <button className="btn secondary" onClick={() => void reconnect()}>
-            重连
+            Reconnect
           </button>
           <button className="btn secondary" onClick={() => void cancelStreaming()} disabled={state.loading === false}>
-            取消接收
+            Cancel Stream
           </button>
           <button className="btn" onClick={resetConversation}>
-            新对话
+            New Chat
           </button>
         </div>
       </header>
 
       <main className="workspace">
         <section className="panel chat-panel">
-          <div className="panel-title">对话</div>
+          <div className="panel-title">Conversation</div>
           <div className="messages">
-            {state.messages.length === 0 ? <div className="empty">输入问题开始对话</div> : null}
+            {state.messages.length === 0 ? <div className="empty">Type a prompt to start the conversation</div> : null}
             {state.messages.map((message) => (
               <MessageCard key={message.id} message={message} />
             ))}
@@ -214,7 +214,7 @@ export default function App(): JSX.Element {
                   void sendMessage();
                 }
               }}
-              placeholder="输入消息，Ctrl/⌘+Enter 发送"
+              placeholder="Type a message, Ctrl/⌘+Enter to send"
             />
             <div className="input-actions">
               <button
@@ -223,10 +223,10 @@ export default function App(): JSX.Element {
                 onClick={() => setInput('')}
                 disabled={state.loading}
               >
-                清空
+                Clear
               </button>
               <button className="btn" type="submit" disabled={state.loading}>
-                {state.loading ? '处理中...' : '发送'}
+                {state.loading ? 'Processing...' : 'Send'}
               </button>
             </div>
           </form>
@@ -234,9 +234,9 @@ export default function App(): JSX.Element {
 
         <section className={'panel tool-panel ' + (showToolPanel ? '' : 'collapsed')}>
           <div className="panel-title with-action">
-            <span>工具</span>
+            <span>Tools</span>
             <button className="btn tiny secondary" onClick={() => setShowToolPanel(!showToolPanel)}>
-              {showToolPanel ? '隐藏' : '显示'}
+              {showToolPanel ? 'Hide' : 'Show'}
             </button>
           </div>
           <div className="tool-tabs">
@@ -244,13 +244,13 @@ export default function App(): JSX.Element {
               className={activeToolTab === 'search' ? 'active' : ''}
               onClick={() => setActiveToolTab('search')}
             >
-              搜索结果
+              Search Results
             </button>
             <button
               className={activeToolTab === 'output' ? 'active' : ''}
               onClick={() => setActiveToolTab('output')}
             >
-              工具输出
+              Tool Output
             </button>
           </div>
           <div className="tool-body">
@@ -266,22 +266,22 @@ export default function App(): JSX.Element {
                 ))
               : state.toolOutputs.map((output) => <OutputCard key={output.id} output={output} />)}
             {activeToolTab === 'search' && state.searchResults.length === 0 ? (
-              <div className="empty">暂无搜索结果</div>
+              <div className="empty">No search results yet</div>
             ) : null}
             {activeToolTab === 'output' && state.toolOutputs.length === 0 ? (
-              <div className="empty">暂无工具输出</div>
+              <div className="empty">No tool output yet</div>
             ) : null}
           </div>
         </section>
 
         <section className="panel browser-panel">
-          <div className="panel-title">浏览器 / 沙箱</div>
+          <div className="panel-title">Browser / Sandbox</div>
           <div className="browser-toolbar">
             <input
               value={state.currentUrl}
               onChange={(event) => onUrlChange(event.target.value)}
               onBlur={() => onUrlChange(normalizeUrl(state.currentUrl))}
-              placeholder="输入网址"
+              placeholder="Enter URL"
             />
             <label className="toggle">
               <input
@@ -289,10 +289,10 @@ export default function App(): JSX.Element {
                 checked={useProxy}
                 onChange={(event) => setUseProxy(event.target.checked)}
               />
-              代理
+              Proxy
             </label>
             <button className={browserMode === 'web' ? 'active' : ''} onClick={() => setBrowserMode('web')}>
-              网页
+              Web
             </button>
             <button
               className={browserMode === 'vnc' ? 'active' : ''}
@@ -307,12 +307,12 @@ export default function App(): JSX.Element {
               state.currentUrl.length > 0 ? (
                 <iframe src={proxyUrl(state.currentUrl, useProxy)} title="web-preview" />
               ) : (
-                <div className="empty">输入网址开始浏览</div>
+                <div className="empty">Enter a URL to start browsing</div>
               )
             ) : state.sandboxVncUrl ? (
               <iframe src={state.sandboxVncUrl} title="vnc-preview" />
             ) : (
-              <div className="empty">VNC 尚未就绪</div>
+              <div className="empty">VNC is not ready yet</div>
             )}
           </div>
         </section>
@@ -325,7 +325,7 @@ function MessageCard({ message }: { message: ChatMessage }): JSX.Element {
   return (
     <article className={'message-card ' + message.role}>
       <header>
-        <strong>{message.role === 'user' ? '你' : 'AI'}</strong>
+        <strong>{message.role === 'user' ? 'User' : 'AI'}</strong>
         <span>{message.time}</span>
       </header>
       <div
@@ -334,7 +334,7 @@ function MessageCard({ message }: { message: ChatMessage }): JSX.Element {
       />
       {message.logs.length > 0 ? (
         <details>
-          <summary>思考过程 ({message.logs.length})</summary>
+          <summary>Reasoning trace ({message.logs.length})</summary>
           <div className="logs">
             {message.logs.map((log, index) => (
               <div key={String(index) + '-' + (log.timestamp || '')} className="log-line">
@@ -379,7 +379,7 @@ function normalizeUrl(url: string): string {
 }
 
 function nowTime(): string {
-  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
 function sleep(ms: number): Promise<void> {

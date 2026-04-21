@@ -45,7 +45,6 @@ export interface WorkflowResultPayload {
 export interface SessionInfoPayload {
   sessionId: string;
   sandboxVncUrl?: string;
-  sandboxContainerId?: string;
   sandboxStatus?: string;
   sandboxCreatedAt?: string;
   sandboxAvailable?: boolean;

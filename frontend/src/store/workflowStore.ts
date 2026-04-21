@@ -34,6 +34,14 @@ export interface WorkflowState {
   sandboxVncUrl: string | null;
 }
 
+export interface WorkflowSnapshot {
+  messages: ChatMessage[];
+  searchResults: SearchResultItem[];
+  toolOutputs: ToolOutput[];
+  currentUrl: string;
+  sandboxVncUrl: string | null;
+}
+
 export type WorkflowAction =
   | { type: 'SEND_USER_MESSAGE'; payload: { content: string; time: string } }
   | { type: 'START_ASSISTANT_MESSAGE'; payload: { time: string } }
@@ -46,6 +54,7 @@ export type WorkflowAction =
   | { type: 'SET_STREAM'; payload: { sessionId: string; topic: string } }
   | { type: 'SET_VNC_URL'; payload: string | null }
   | { type: 'SET_CURRENT_URL'; payload: string }
+  | { type: 'LOAD_SNAPSHOT'; payload: WorkflowSnapshot }
   | { type: 'RESET' };
 
 export const initialWorkflowState: WorkflowState = {
@@ -148,6 +157,15 @@ export function workflowReducer(state: WorkflowState, action: WorkflowAction): W
       return { ...state, sandboxVncUrl: action.payload };
     case 'SET_CURRENT_URL':
       return { ...state, currentUrl: action.payload };
+    case 'LOAD_SNAPSHOT':
+      return {
+        ...initialWorkflowState,
+        messages: action.payload.messages,
+        searchResults: action.payload.searchResults,
+        toolOutputs: action.payload.toolOutputs,
+        currentUrl: action.payload.currentUrl,
+        sandboxVncUrl: action.payload.sandboxVncUrl
+      };
     case 'RESET':
       return { ...initialWorkflowState };
     default:

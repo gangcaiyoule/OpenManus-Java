@@ -44,4 +44,23 @@ describe('workflowReducer', () => {
 
     expect(state.error).toBe('boom');
   });
+
+  it('loads snapshot into fresh workflow state', () => {
+    const state = workflowReducer(initialWorkflowState, {
+      type: 'LOAD_SNAPSHOT',
+      payload: {
+        messages: [{ id: 'm1', role: 'user', content: 'hi', time: '10:00', logs: [] }],
+        searchResults: [],
+        toolOutputs: [{ id: 'o1', type: 'Tool', content: 'ok', time: '10:01' }],
+        currentUrl: 'https://example.com',
+        sandboxVncUrl: 'https://vnc.local'
+      }
+    });
+
+    expect(state.messages.length).toBe(1);
+    expect(state.messages[0].content).toBe('hi');
+    expect(state.toolOutputs.length).toBe(1);
+    expect(state.currentUrl).toBe('https://example.com');
+    expect(state.sessionId).toBeNull();
+  });
 });

@@ -21,24 +21,14 @@
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <maven.compiler.release>21</maven.compiler.release>
-        <langchain4j.version>1.1.0-beta7</langchain4j.version>
-        <langchain4j.bom.version>1.1.0</langchain4j.bom.version>
         <jackson.version>2.17.2</jackson.version>
         <lombok.version>1.18.30</lombok.version>
+        <openmanus.liveSmoke.enabled>false</openmanus.liveSmoke.enabled>
+        <surefire.excludedGroups>live-smoke</surefire.excludedGroups>
     </properties>
 
     <dependencyManagement>
         <dependencies>
-            <!-- LangChain4j BOM -->
-            <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-bom</artifactId>
-                <version>${langchain4j.bom.version}</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-
-            
             <!-- Jackson BOM for version management -->
             <dependency>
                 <groupId>com.fasterxml.jackson</groupId>
@@ -46,16 +36,6 @@
                 <version>${jackson.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-chroma</artifactId>
-                <version>${langchain4j.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>dev.langchain4j</groupId>
-                <artifactId>langchain4j-web-search-engine-tavily</artifactId>
-                <version>${langchain4j.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -116,19 +96,6 @@
             <optional>true</optional>
         </dependency>
 
-        <!-- LangChain4j Core -->
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j</artifactId>
-        </dependency>
-
-        <!-- MCP support - temporarily disabled as not available in current version -->
-        <dependency>
-            <groupId>dev.langchain4j</groupId>
-            <artifactId>langchain4j-mcp</artifactId>
-            <version>${langchain4j.version}</version>
-        </dependency>
-        
         <!-- Jsoup for HTML parsing -->
         <dependency>
             <groupId>org.jsoup</groupId>
@@ -141,6 +108,13 @@
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
             <version>2.11.0</version>
+        </dependency>
+
+        <!-- Model tokenizer implementation for context token budgeting -->
+        <dependency>
+            <groupId>com.knuddels</groupId>
+            <artifactId>jtokkit</artifactId>
+            <version>1.1.0</version>
         </dependency>
 
         <!-- Docker Client -->
@@ -251,7 +225,11 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.2.5</version>
                 <configuration>
-                    <argLine>-Dnet.bytebuddy.experimental=true</argLine>
+                    <argLine>@{argLine} -Dnet.bytebuddy.experimental=true</argLine>
+                    <systemPropertyVariables>
+                        <openmanus.liveSmoke.enabled>${openmanus.liveSmoke.enabled}</openmanus.liveSmoke.enabled>
+                    </systemPropertyVariables>
+                    <excludedGroups>${surefire.excludedGroups}</excludedGroups>
                 </configuration>
             </plugin>
             
@@ -397,4 +375,5 @@
             </plugin>
         </plugins>
     </build>
+
 </project>
