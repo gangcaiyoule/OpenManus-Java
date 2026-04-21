@@ -89,7 +89,7 @@ class AnthropicClientIntegrationTest {
                         .apiKey("test-key")
                         .model("claude-3-5-sonnet-latest")
                         .timeoutSeconds(5)
-                        .maxRetries(0)
+                        .maxRetries(1)
                         .build(),
                 new AnthropicRequestAssembler(objectMapper),
                 new AnthropicResponseParser(),

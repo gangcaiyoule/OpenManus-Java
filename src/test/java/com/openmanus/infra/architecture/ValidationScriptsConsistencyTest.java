@@ -27,6 +27,7 @@ class ValidationScriptsConsistencyTest {
 
     private static final Path VALIDATE_SCRIPT = Path.of("scripts/validate-single-agent.sh");
     private static final Path MVNW_LOCAL_SCRIPT = Path.of("scripts/mvnw-local.sh");
+    private static final Path DOTENV_EXAMPLE = Path.of("dotenv.example");
     private static final Path VALIDATION_DOC = Path.of("docs/SINGLE_AGENT_VALIDATION.md");
     private static final Path ROLLOUT_DOC = Path.of("docs/SINGLE_AGENT_ROLLOUT.md");
     private static final Set<String> EXPECTED_RETRY_TAG_KEYS = Set.of(
@@ -70,6 +71,10 @@ class ValidationScriptsConsistencyTest {
                 "validate-single-agent.sh should invoke mvnw-local.sh with quoted TEST_ARGS array expansion");
         assertTrue(content.contains("MvnwLocalScriptIntegrationTest"),
                 "validate-single-agent.sh must keep MvnwLocalScriptIntegrationTest in regression gate");
+        assertTrue(content.contains("RuntimeChatMemoryProviderTest"),
+                "validate-single-agent.sh must keep RuntimeChatMemoryProviderTest in regression gate");
+        assertTrue(content.contains("rm -rf target/test-classes"),
+                "validate-single-agent.sh should clean stale target/test-classes before regression tests");
         assertTrue(content.contains("Unable to access jarfile .*/surefirebooter-.*\\.jar"),
                 "validate-single-agent.sh must retry only for transient surefire bootstrap error signature");
         assertTrue(content.contains(retrySignatureMatchedTag),
@@ -103,6 +108,36 @@ class ValidationScriptsConsistencyTest {
     }
 
     @Test
+    void dotenvExampleShouldDocumentAllLiveSmokeEnvVars() throws IOException {
+        String content = Files.readString(DOTENV_EXAMPLE);
+
+        assertTrue(content.contains("scripts/run-live-smoke.sh"),
+                "dotenv.example should explain that live smoke variables are used by run-live-smoke.sh");
+        assertTrue(content.contains("OPENMANUS_LIVE_MODEL="),
+                "dotenv.example must include the OpenAI live smoke model placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_MODEL_CANDIDATES="),
+                "dotenv.example must include the OpenAI live smoke model candidate placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_BASE_URL="),
+                "dotenv.example must include the OpenAI live smoke base URL placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_API_KEY="),
+                "dotenv.example must include the OpenAI live smoke API key placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_CA_CERT_FILE="),
+                "dotenv.example must include the optional OpenAI live smoke CA cert file placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_ANTHROPIC_MODEL="),
+                "dotenv.example must include the Anthropic live smoke model placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_ANTHROPIC_BASE_URL="),
+                "dotenv.example must include the Anthropic live smoke base URL placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_ANTHROPIC_API_KEY="),
+                "dotenv.example must include the Anthropic live smoke API key placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_GEMINI_MODEL="),
+                "dotenv.example must include the Gemini live smoke model placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_GEMINI_BASE_URL="),
+                "dotenv.example must include the Gemini live smoke base URL placeholder");
+        assertTrue(content.contains("OPENMANUS_LIVE_GEMINI_API_KEY="),
+                "dotenv.example must include the Gemini live smoke API key placeholder");
+    }
+
+    @Test
     void shouldKeepValidationDocAlignedWithRegressionGate() throws IOException {
         String content = Files.readString(VALIDATION_DOC);
         String lower = content.toLowerCase();
@@ -114,6 +149,8 @@ class ValidationScriptsConsistencyTest {
 
         assertTrue(content.contains("MvnwLocalScriptIntegrationTest"),
                 "SINGLE_AGENT_VALIDATION.md must include MvnwLocalScriptIntegrationTest in regression command");
+        assertTrue(content.contains("RuntimeChatMemoryProviderTest"),
+                "SINGLE_AGENT_VALIDATION.md must include RuntimeChatMemoryProviderTest in regression command");
         assertTrue(content.contains("./scripts/mvnw-local.sh"),
                 "SINGLE_AGENT_VALIDATION.md should keep mvnw-local.sh as the regression entrypoint");
         assertTrue(content.contains("-Dtest="),

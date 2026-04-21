@@ -1,19 +1,22 @@
 package com.openmanus.infra.config;
 
 import com.openmanus.agent.impl.unified.UnifiedAgent;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.ChatMemoryProvider;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.store.memory.chat.InMemoryChatMemoryStore;
+import com.openmanus.aiframework.runtime.AiChatModel;
+import com.openmanus.aiframework.runtime.AiMemory;
+import com.openmanus.aiframework.runtime.AiMemoryProvider;
+import com.openmanus.aiframework.runtime.model.AiChatMessage;
+import com.openmanus.aiframework.runtime.model.AiChatRequest;
+import com.openmanus.aiframework.runtime.model.AiChatResponse;
+import com.openmanus.aiframework.runtime.model.AiToolCall;
+import com.openmanus.aiframework.runtime.AiToolResultArtifactStore;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -29,16 +32,11 @@ class UnifiedAgentConfigModelContextTest {
 
     @Test
     void shouldApplyModelContextLimitFromPropertiesToUnifiedAgent() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
+        AiChatModel chatModel = mock(AiChatModel.class);
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null));
 
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
+        AiMemoryProvider memoryProvider = buildMemoryProvider();
 
         OpenManusProperties properties = new OpenManusProperties();
         properties.getChatMemory().setModelContextMaxMessages(1);
@@ -47,6 +45,7 @@ class UnifiedAgentConfigModelContextTest {
                 chatModel,
                 memoryProvider,
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
@@ -54,91 +53,61 @@ class UnifiedAgentConfigModelContextTest {
         );
 
         String memoryId = "conv-unified-config-model-context";
-        ChatMemory memory = memoryProvider.get(memoryId);
-        memory.add(SystemMessage.from("you are a test agent"));
-        memory.add(UserMessage.from("old-1"));
-        memory.add(AiMessage.from("old-2"));
+        AiMemory memory = memoryProvider.get(memoryId);
+        memory.add(AiChatMessage.system("you are a test agent"));
+        memory.add(AiChatMessage.user("old-1"));
+        memory.add(AiChatMessage.assistant("old-2"));
 
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), memoryId);
+        String result = agent.execute("new-question", memoryId);
         assertEquals("ok", result);
 
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(chatModel, times(1)).chat(requestCaptor.capture());
 
-        String modelPayload = requestCaptor.getValue().messages().toString();
+        List<AiChatMessage> modelMessages = requestCaptor.getValue().messages();
+        String modelPayload = modelMessages.toString();
         assertTrue(modelPayload.contains("new-question"));
         assertTrue(modelPayload.contains("you are a test agent"));
-        assertFalse(modelPayload.contains("old-1"));
-        assertFalse(modelPayload.contains("old-2"));
-        assertEquals(2, requestCaptor.getValue().messages().size());
+        assertEquals(3, modelMessages.size());
+        assertTrue(modelMessages.stream().anyMatch(message ->
+                message.role() == AiChatMessage.Role.ASSISTANT
+                        && message.content().contains("[Historical Key Memory]")));
     }
 
     @Test
-    void shouldApplyModelContextTotalLimitFromPropertiesToUnifiedAgentDuringToolLoop() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
-
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
+    void shouldApplyReactMaxIterationsFromPropertiesToUnifiedAgent() {
+        AiChatModel chatModel = mock(AiChatModel.class);
+        AiToolCall toolCall = new AiToolCall("", "unknown_tool", "{}");
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant(null, List.of(toolCall)), null, null, null, null, null));
 
         OpenManusProperties properties = new OpenManusProperties();
-        properties.getChatMemory().setModelContextMaxMessages(0);
-        properties.getChatMemory().setModelContextMaxTotalMessages(2);
+        properties.getChatMemory().setReactMaxIterations(1);
 
         UnifiedAgent agent = new UnifiedAgentConfig().unifiedAgent(
                 chatModel,
-                memoryProvider,
+                buildMemoryProvider(),
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
                 null
         );
 
-        String memoryId = "conv-unified-config-model-context-total";
-        ChatMemory memory = memoryProvider.get(memoryId);
-        memory.add(SystemMessage.from("you are a test agent"));
-        memory.add(UserMessage.from("old-1"));
-        memory.add(AiMessage.from("old-2"));
-
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), memoryId);
-        assertEquals("ok", result);
-
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
-        verify(chatModel, times(1)).chat(requestCaptor.capture());
-
-        String modelPayload = requestCaptor.getValue().messages().toString();
-        assertTrue(modelPayload.contains("new-question"));
-        assertTrue(modelPayload.contains("you are a test agent"));
-        assertFalse(modelPayload.contains("old-1"));
-        assertFalse(modelPayload.contains("old-2"));
-        assertEquals(2, requestCaptor.getValue().messages().size());
+        RuntimeException ex = assertThrows(RuntimeException.class,
+                () -> agent.execute("new-question", "conv-unified-config-react-iter"));
+        assertTrue(ex.getMessage().contains("Agent exceeded maximum iterations (1)"));
+        verify(chatModel, times(1)).chat(any(AiChatRequest.class));
     }
 
     @Test
     void shouldKeepCurrentUserWhenTotalLimitIsOneFromProperties() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
+        AiChatModel chatModel = mock(AiChatModel.class);
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null));
 
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
-
+        AiMemoryProvider memoryProvider = buildMemoryProvider();
         OpenManusProperties properties = new OpenManusProperties();
         properties.getChatMemory().setModelContextMaxMessages(0);
         properties.getChatMemory().setModelContextMaxTotalMessages(1);
@@ -147,6 +116,7 @@ class UnifiedAgentConfigModelContextTest {
                 chatModel,
                 memoryProvider,
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
@@ -154,18 +124,15 @@ class UnifiedAgentConfigModelContextTest {
         );
 
         String memoryId = "conv-unified-config-model-context-total-one";
-        ChatMemory memory = memoryProvider.get(memoryId);
-        memory.add(SystemMessage.from("you are a test agent"));
-        memory.add(UserMessage.from("old-1"));
-        memory.add(AiMessage.from("old-2"));
+        AiMemory memory = memoryProvider.get(memoryId);
+        memory.add(AiChatMessage.system("you are a test agent"));
+        memory.add(AiChatMessage.user("old-1"));
+        memory.add(AiChatMessage.assistant("old-2"));
 
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), memoryId);
+        String result = agent.execute("new-question", memoryId);
         assertEquals("ok", result);
 
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(chatModel, times(1)).chat(requestCaptor.capture());
         String modelPayload = requestCaptor.getValue().messages().toString();
         assertTrue(modelPayload.contains("new-question"));
@@ -174,22 +141,44 @@ class UnifiedAgentConfigModelContextTest {
     }
 
     @Test
-    void shouldApplyModelContextTotalLimitFromPropertiesToUnifiedAgent() {
-        ChatModel chatModel = mock(ChatModel.class);
-        ToolExecutionRequest toolCall = ToolExecutionRequest.builder()
-                .name("unknown_tool")
-                .arguments("{}")
-                .build();
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(toolCall)).build())
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
+    void shouldApplyModelContextTotalLimitFromPropertiesToUnifiedAgentDuringToolLoop() {
+        AiToolCall toolCall = new AiToolCall("", "unknown_tool", "{}");
+        AiChatModel chatModel = mockChatModel(
+                new AiChatResponse(AiChatMessage.assistant(null, List.of(toolCall)), null, null, null, null, null),
+                new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null)
+        );
 
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
+        OpenManusProperties properties = new OpenManusProperties();
+        properties.getChatMemory().setModelContextMaxMessages(0);
+        properties.getChatMemory().setModelContextMaxTotalMessages(2);
+
+        UnifiedAgent agent = new UnifiedAgentConfig().unifiedAgent(
+                chatModel,
+                buildMemoryProvider(),
+                properties,
+                mock(AiToolResultArtifactStore.class),
+                null,
+                null,
+                null,
+                null
+        );
+
+        String result = agent.execute("new-question", "conv-unified-config-model-context-total");
+        assertEquals("ok", result);
+
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(chatModel, times(2)).chat(requestCaptor.capture());
+        assertTrue(requestCaptor.getAllValues().get(0).messages().size() <= 2);
+        assertTrue(requestCaptor.getAllValues().get(1).messages().size() <= 2);
+    }
+
+    @Test
+    void shouldApplyModelContextTotalLimitFromPropertiesToUnifiedAgent() {
+        AiToolCall toolCall = new AiToolCall("", "unknown_tool", "{}");
+        AiChatModel chatModel = mockChatModel(
+                new AiChatResponse(AiChatMessage.assistant(null, List.of(toolCall)), null, null, null, null, null),
+                new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null)
+        );
 
         OpenManusProperties properties = new OpenManusProperties();
         properties.getChatMemory().setModelContextMaxMessages(2);
@@ -197,21 +186,19 @@ class UnifiedAgentConfigModelContextTest {
 
         UnifiedAgent agent = new UnifiedAgentConfig().unifiedAgent(
                 chatModel,
-                memoryProvider,
+                buildMemoryProvider(),
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
                 null
         );
 
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), "conv-unified-config-total-context");
+        String result = agent.execute("new-question", "conv-unified-config-total-context");
         assertEquals("ok", result);
 
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(chatModel, times(2)).chat(requestCaptor.capture());
         assertTrue(requestCaptor.getAllValues().get(0).messages().size() <= 3);
         assertTrue(requestCaptor.getAllValues().get(1).messages().size() <= 3);
@@ -219,17 +206,11 @@ class UnifiedAgentConfigModelContextTest {
 
     @Test
     void shouldClampNegativeModelContextLimitsBeforeWiringToUnifiedAgent() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
+        AiChatModel chatModel = mock(AiChatModel.class);
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null));
 
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
-
+        AiMemoryProvider memoryProvider = buildMemoryProvider();
         OpenManusProperties properties = new OpenManusProperties();
         properties.getChatMemory().setModelContextMaxMessages(-1);
         properties.getChatMemory().setModelContextMaxTotalMessages(-1);
@@ -238,6 +219,7 @@ class UnifiedAgentConfigModelContextTest {
                 chatModel,
                 memoryProvider,
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
@@ -245,19 +227,16 @@ class UnifiedAgentConfigModelContextTest {
         );
 
         String memoryId = "conv-unified-config-negative-context";
-        ChatMemory memory = memoryProvider.get(memoryId);
-        memory.add(SystemMessage.from("you are a test agent"));
-        memory.add(UserMessage.from("old-1"));
-        memory.add(AiMessage.from("old-2"));
-        memory.add(UserMessage.from("old-3"));
+        AiMemory memory = memoryProvider.get(memoryId);
+        memory.add(AiChatMessage.system("you are a test agent"));
+        memory.add(AiChatMessage.user("old-1"));
+        memory.add(AiChatMessage.assistant("old-2"));
+        memory.add(AiChatMessage.user("old-3"));
 
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), memoryId);
+        String result = agent.execute("new-question", memoryId);
         assertEquals("ok", result);
 
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(chatModel, times(1)).chat(requestCaptor.capture());
         String payload = requestCaptor.getValue().messages().toString();
         assertTrue(payload.contains("you are a test agent"));
@@ -268,57 +247,12 @@ class UnifiedAgentConfigModelContextTest {
     }
 
     @Test
-    void shouldApplyReactMaxIterationsFromPropertiesToUnifiedAgent() {
-        ChatModel chatModel = mock(ChatModel.class);
-        ToolExecutionRequest toolCall = ToolExecutionRequest.builder()
-                .name("unknown_tool")
-                .arguments("{}")
-                .build();
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(toolCall)).build());
-
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
-
-        OpenManusProperties properties = new OpenManusProperties();
-        properties.getChatMemory().setReactMaxIterations(1);
-
-        UnifiedAgent agent = new UnifiedAgentConfig().unifiedAgent(
-                chatModel,
-                memoryProvider,
-                properties,
-                null,
-                null,
-                null,
-                null
-        );
-
-        RuntimeException ex = assertThrows(RuntimeException.class,
-                () -> agent.execute(ToolExecutionRequest.builder()
-                        .name("unified_agent")
-                        .arguments("new-question")
-                        .build(), "conv-unified-config-react-iter"));
-        assertTrue(ex.getMessage().contains("maximum iterations (1)"));
-        verify(chatModel, times(1)).chat(any(ChatRequest.class));
-    }
-
-    @Test
     void shouldApplyApproxTokenLimitFromPropertiesToUnifiedAgent() {
-        ChatModel chatModel = mock(ChatModel.class);
-        when(chatModel.chat(any(ChatRequest.class)))
-                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
+        AiChatModel chatModel = mock(AiChatModel.class);
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null));
 
-        InMemoryChatMemoryStore store = new InMemoryChatMemoryStore();
-        ChatMemoryProvider memoryProvider = memoryId -> MessageWindowChatMemory.builder()
-                .id(memoryId)
-                .maxMessages(200)
-                .chatMemoryStore(store)
-                .build();
-
+        AiMemoryProvider memoryProvider = buildMemoryProvider();
         OpenManusProperties properties = new OpenManusProperties();
         properties.getChatMemory().setModelContextMaxMessages(0);
         properties.getChatMemory().setModelContextMaxTotalMessages(0);
@@ -328,6 +262,7 @@ class UnifiedAgentConfigModelContextTest {
                 chatModel,
                 memoryProvider,
                 properties,
+                mock(AiToolResultArtifactStore.class),
                 null,
                 null,
                 null,
@@ -335,19 +270,16 @@ class UnifiedAgentConfigModelContextTest {
         );
 
         String memoryId = "conv-unified-config-approx-token";
-        ChatMemory memory = memoryProvider.get(memoryId);
-        memory.add(SystemMessage.from("you are a test agent"));
-        memory.add(UserMessage.from("old-large-1-" + "A".repeat(1000)));
-        memory.add(AiMessage.from("old-large-2-" + "B".repeat(1000)));
-        memory.add(UserMessage.from("recent-small"));
+        AiMemory memory = memoryProvider.get(memoryId);
+        memory.add(AiChatMessage.system("you are a test agent"));
+        memory.add(AiChatMessage.user("old-large-1-" + "A".repeat(1000)));
+        memory.add(AiChatMessage.assistant("old-large-2-" + "B".repeat(1000)));
+        memory.add(AiChatMessage.user("recent-small"));
 
-        String result = agent.execute(ToolExecutionRequest.builder()
-                .name("unified_agent")
-                .arguments("new-question")
-                .build(), memoryId);
+        String result = agent.execute("new-question", memoryId);
         assertEquals("ok", result);
 
-        ArgumentCaptor<ChatRequest> requestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
         verify(chatModel, times(1)).chat(requestCaptor.capture());
         String payload = requestCaptor.getValue().messages().toString();
         assertTrue(payload.contains("new-question"));
@@ -355,5 +287,94 @@ class UnifiedAgentConfigModelContextTest {
         assertTrue(payload.contains("recent-small"));
         assertFalse(payload.contains("old-large-1-"));
         assertFalse(payload.contains("old-large-2-"));
+    }
+
+    @Test
+    void shouldApplyTokenizerBudgetWhenTokenizerModeConfigured() {
+        AiChatModel chatModel = mock(AiChatModel.class);
+        when(chatModel.chat(any(AiChatRequest.class)))
+                .thenReturn(new AiChatResponse(AiChatMessage.assistant("ok"), null, null, null, null, null));
+
+        AiMemoryProvider memoryProvider = buildMemoryProvider();
+        OpenManusProperties properties = new OpenManusProperties();
+        properties.getChatMemory().setModelContextMaxMessages(0);
+        properties.getChatMemory().setModelContextMaxTotalMessages(0);
+        properties.getChatMemory().setModelContextMaxApproxTokens(120);
+        properties.getChatMemory().setModelContextTokenCountMode("tokenizer");
+
+        UnifiedAgent agent = new UnifiedAgentConfig().unifiedAgent(
+                chatModel,
+                memoryProvider,
+                properties,
+                mock(AiToolResultArtifactStore.class),
+                null,
+                null,
+                null,
+                null
+        );
+
+        String memoryId = "conv-unified-config-tokenizer-budget";
+        AiMemory memory = memoryProvider.get(memoryId);
+        memory.add(AiChatMessage.system("you are a test agent"));
+        memory.add(AiChatMessage.user("old-large-1-" + "A".repeat(1000)));
+        memory.add(AiChatMessage.assistant("old-large-2-" + "B".repeat(1000)));
+        memory.add(AiChatMessage.user("recent-small"));
+
+        String result = agent.execute("new-question", memoryId);
+        assertEquals("ok", result);
+
+        ArgumentCaptor<AiChatRequest> requestCaptor = ArgumentCaptor.forClass(AiChatRequest.class);
+        verify(chatModel, times(1)).chat(requestCaptor.capture());
+        String payload = requestCaptor.getValue().messages().toString();
+        assertTrue(payload.contains("new-question"));
+        assertTrue(payload.contains("recent-small"));
+        assertFalse(payload.contains("old-large-1-"));
+        assertFalse(payload.contains("old-large-2-"));
+    }
+
+    private static AiChatModel mockChatModel(AiChatResponse... responses) {
+        AiChatModel chatModel = mock(AiChatModel.class);
+        if (responses == null || responses.length == 0) {
+            return chatModel;
+        }
+        AiChatResponse first = responses[0];
+        AiChatResponse[] rest = Arrays.copyOfRange(responses, 1, responses.length);
+        when(chatModel.chat(any(AiChatRequest.class))).thenReturn(first, rest);
+        return chatModel;
+    }
+
+    private static AiMemoryProvider buildMemoryProvider() {
+        Map<Object, AiMemory> store = new ConcurrentHashMap<>();
+        return memoryId -> store.computeIfAbsent(memoryId, InMemoryAiMemory::new);
+    }
+
+    private static final class InMemoryAiMemory implements AiMemory {
+
+        private final Object memoryId;
+        private final List<AiChatMessage> messages = new ArrayList<>();
+
+        private InMemoryAiMemory(Object memoryId) {
+            this.memoryId = memoryId;
+        }
+
+        @Override
+        public Object id() {
+            return memoryId;
+        }
+
+        @Override
+        public List<AiChatMessage> messages() {
+            return List.copyOf(messages);
+        }
+
+        @Override
+        public void add(AiChatMessage message) {
+            messages.add(message);
+        }
+
+        @Override
+        public void clear() {
+            messages.clear();
+        }
     }
 }

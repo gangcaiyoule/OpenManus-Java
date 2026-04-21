@@ -4,7 +4,14 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -78,5 +85,52 @@ class FileToolResultArtifactStoreTest {
         assertEquals(20, recent.size(), "超限后应裁剪到配置上限");
         assertTrue(recent.get(0).toolArguments().contains("\"299\""));
         assertTrue(recent.get(19).toolArguments().contains("\"280\""));
+    }
+
+    @Test
+    void shouldHandleVeryLargeRecentLimitWithoutOverflow() throws Exception {
+        Path dir = Files.createTempDirectory("tool-artifacts-large-limit-");
+        FileToolResultArtifactStore store = new FileToolResultArtifactStore(dir);
+
+        store.save("mem-large-limit", "search", "{\"q\":\"0\"}", "result-0");
+        store.save("mem-large-limit", "search", "{\"q\":\"1\"}", "result-1");
+
+        List<ToolResultArtifactStore.ArtifactRef> recent = store.recent("mem-large-limit", Integer.MAX_VALUE);
+        assertEquals(2, recent.size(), "极大 limit 应返回所有可用结果而不是因溢出返回空列表");
+        assertTrue(recent.get(0).toolArguments().contains("\"1\""));
+        assertTrue(recent.get(1).toolArguments().contains("\"0\""));
+    }
+
+    @Test
+    void shouldAllowConcurrentSaveForSamePayload() throws Exception {
+        Path dir = Files.createTempDirectory("tool-artifacts-concurrent-");
+        FileToolResultArtifactStore store = new FileToolResultArtifactStore(dir);
+        int concurrency = 16;
+        CountDownLatch startLatch = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(concurrency);
+        try {
+            List<Callable<String>> tasks = new ArrayList<>();
+            for (int i = 0; i < concurrency; i++) {
+                final int idx = i;
+                tasks.add(() -> {
+                    startLatch.await();
+                    return store.save("mem-concurrent-" + idx, "search", "{\"q\":\"same\"}", "same-result");
+                });
+            }
+            List<Future<String>> futures = tasks.stream().map(pool::submit).toList();
+            startLatch.countDown();
+
+            Set<String> artifactIds = futures.stream().map(future -> {
+                try {
+                    return future.get();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }).collect(java.util.stream.Collectors.toSet());
+
+            assertEquals(1, artifactIds.size(), "同一 payload 并发保存时应稳定复用同一个 artifactId");
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

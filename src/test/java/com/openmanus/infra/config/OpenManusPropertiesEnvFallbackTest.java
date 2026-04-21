@@ -7,6 +7,9 @@ import org.junit.jupiter.api.parallel.ResourceAccessMode;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.junit.jupiter.api.parallel.Resources;
 
+import java.util.Locale;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,13 +30,260 @@ class OpenManusPropertiesEnvFallbackTest {
         assertEquals(200, properties.getChatMemory().getCompactToolResultTailChars());
         assertEquals(0, properties.getChatMemory().getModelContextMaxTotalMessages());
         assertEquals(128000, properties.getChatMemory().getModelContextMaxApproxTokens());
+        assertEquals("approx", properties.getChatMemory().getModelContextTokenCountMode());
         assertFalse(properties.getChatMemory().isCompactToolResultsEnabled());
         assertTrue(properties.getChatMemory().isToolResultOffloadEnabled());
         assertTrue(properties.getChatMemory().isToolResultRehydrateEnabled());
+        assertFalse(properties.getMcp().isEnabled());
+        assertFalse(properties.getWebProxy().isEnabled());
+        assertEquals(List.of(), properties.getWebProxy().getAllowedOrigins());
+        assertEquals(240, properties.getChatMemory().getTaskStatePlanMaxChars());
+        assertEquals(120, properties.getChatMemory().getTaskStateInProgressMaxChars());
+        assertEquals(240, properties.getChatMemory().getTaskStateLastFailureMaxChars());
+        assertEquals(6, properties.getChatMemory().getTaskStateTodoMaxItems());
+        assertEquals(120, properties.getChatMemory().getTaskStateTodoItemMaxChars());
         assertEquals(240, properties.getChatMemory().getToolResultOffloadHeadChars());
         assertEquals(160, properties.getChatMemory().getToolResultOffloadTailChars());
         assertEquals(2, properties.getChatMemory().getToolResultRehydrateMaxPerRound());
         assertEquals(20000, properties.getChatMemory().getToolResultArtifactMaxIndexEntriesPerMemory());
+    }
+
+    @Test
+    void shouldApplyMcpEnabledFromSystemProperty() {
+        String key = "OPENMANUS_MCP_ENABLED";
+        String original = System.getProperty(key);
+        try {
+            System.setProperty(key, "true");
+            OpenManusProperties properties = new OpenManusProperties();
+
+            properties.applyEnvFallbacks();
+
+            assertTrue(properties.getMcp().isEnabled());
+        } finally {
+            restoreSystemProperty(key, original);
+        }
+    }
+
+    @Test
+    void shouldIgnoreLiveOnlyFallbacksForDefaultLlm() {
+        String liveModelKey = "OPENMANUS_LIVE_MODEL";
+        String liveBaseUrlKey = "OPENMANUS_LIVE_BASE_URL";
+        String liveApiKeyKey = "OPENMANUS_LIVE_API_KEY";
+        String originalLiveModel = System.getProperty(liveModelKey);
+        String originalLiveBaseUrl = System.getProperty(liveBaseUrlKey);
+        String originalLiveApiKey = System.getProperty(liveApiKeyKey);
+        try {
+            OpenManusProperties baseline = new OpenManusProperties();
+            baseline.getLlm().getDefaultLlm().setModel(" ");
+            baseline.getLlm().getDefaultLlm().setBaseUrl(" ");
+            baseline.getLlm().getDefaultLlm().setApiKey(" ");
+            baseline.applyEnvFallbacks();
+
+            System.setProperty(liveModelKey, "live-only-model");
+            System.setProperty(liveBaseUrlKey, "https://live-only.example/v1");
+            System.setProperty(liveApiKeyKey, "live-only-key");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getLlm().getDefaultLlm().setModel(" ");
+            properties.getLlm().getDefaultLlm().setBaseUrl(" ");
+            properties.getLlm().getDefaultLlm().setApiKey(" ");
+
+            properties.applyEnvFallbacks();
+
+            assertEquals(baseline.getLlm().getDefaultLlm().getModel(), properties.getLlm().getDefaultLlm().getModel());
+            assertEquals(baseline.getLlm().getDefaultLlm().getBaseUrl(),
+                    properties.getLlm().getDefaultLlm().getBaseUrl());
+            assertEquals(baseline.getLlm().getDefaultLlm().getApiKey(), properties.getLlm().getDefaultLlm().getApiKey());
+        } finally {
+            restoreSystemProperty(liveModelKey, originalLiveModel);
+            restoreSystemProperty(liveBaseUrlKey, originalLiveBaseUrl);
+            restoreSystemProperty(liveApiKeyKey, originalLiveApiKey);
+        }
+    }
+
+    @Test
+    void shouldApplyDefaultLlmFallbacksFromOpenAiCompatibilityEnv() {
+        String modelKey = "OPENAI_MODEL";
+        String baseUrlKey = "OPENAI_BASE_URL";
+        String apiKeyKey = "OPENAI_API_KEY";
+        String originalModel = System.getProperty(modelKey);
+        String originalBaseUrl = System.getProperty(baseUrlKey);
+        String originalApiKey = System.getProperty(apiKeyKey);
+        try {
+            System.setProperty(modelKey, "legacy-openai-model");
+            System.setProperty(baseUrlKey, "https://legacy-openai.example/v1");
+            System.setProperty(apiKeyKey, "legacy-openai-key");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getLlm().getDefaultLlm().setModel(" ");
+            properties.getLlm().getDefaultLlm().setBaseUrl(" ");
+            properties.getLlm().getDefaultLlm().setApiKey(" ");
+
+            properties.applyEnvFallbacks();
+
+            assertEquals("legacy-openai-model", properties.getLlm().getDefaultLlm().getModel());
+            assertEquals("https://legacy-openai.example/v1", properties.getLlm().getDefaultLlm().getBaseUrl());
+            assertEquals("legacy-openai-key", properties.getLlm().getDefaultLlm().getApiKey());
+        } finally {
+            restoreSystemProperty(modelKey, originalModel);
+            restoreSystemProperty(baseUrlKey, originalBaseUrl);
+            restoreSystemProperty(apiKeyKey, originalApiKey);
+        }
+    }
+
+    @Test
+    void shouldNotOverrideExplicitDefaultLlmWhenFallbackEnvExists() {
+        String modelKey = "OPENAI_MODEL";
+        String baseUrlKey = "OPENAI_BASE_URL";
+        String apiKeyKey = "OPENAI_API_KEY";
+        String originalModel = System.getProperty(modelKey);
+        String originalBaseUrl = System.getProperty(baseUrlKey);
+        String originalApiKey = System.getProperty(apiKeyKey);
+        try {
+            System.setProperty(modelKey, "legacy-openai-model");
+            System.setProperty(baseUrlKey, "https://legacy-openai.example/v1");
+            System.setProperty(apiKeyKey, "legacy-openai-key");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getLlm().getDefaultLlm().setModel("configured-model");
+            properties.getLlm().getDefaultLlm().setBaseUrl("https://configured.example/v1");
+            properties.getLlm().getDefaultLlm().setApiKey("configured-key");
+
+            properties.applyEnvFallbacks();
+
+            assertEquals("configured-model", properties.getLlm().getDefaultLlm().getModel());
+            assertEquals("https://configured.example/v1", properties.getLlm().getDefaultLlm().getBaseUrl());
+            assertEquals("configured-key", properties.getLlm().getDefaultLlm().getApiKey());
+        } finally {
+            restoreSystemProperty(modelKey, originalModel);
+            restoreSystemProperty(baseUrlKey, originalBaseUrl);
+            restoreSystemProperty(apiKeyKey, originalApiKey);
+        }
+    }
+
+    @Test
+    void shouldApplyWebProxySettingsFromSystemProperty() {
+        String enabledKey = "OPENMANUS_WEB_PROXY_ENABLED";
+        String originsKey = "OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS";
+        String oldEnabled = System.getProperty(enabledKey);
+        String oldOrigins = System.getProperty(originsKey);
+        try {
+            System.setProperty(enabledKey, "true");
+            System.setProperty(originsKey, " https://app.example.com , , https://admin.example.com ");
+            OpenManusProperties properties = new OpenManusProperties();
+
+            properties.applyEnvFallbacks();
+
+            assertTrue(properties.getWebProxy().isEnabled());
+            assertEquals(List.of("https://app.example.com", "https://admin.example.com"),
+                    properties.getWebProxy().getAllowedOrigins());
+        } finally {
+            restoreSystemProperty(enabledKey, oldEnabled);
+            restoreSystemProperty(originsKey, oldOrigins);
+        }
+    }
+
+    @Test
+    void shouldNotOverrideExplicitWebProxyOriginsWhenSystemPropertyIsSet() {
+        String key = "OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS";
+        String original = System.getProperty(key);
+        try {
+            System.setProperty(key, "https://env.example.com");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getWebProxy().setAllowedOrigins(List.of("https://explicit.example.com"));
+
+            properties.applyEnvFallbacks();
+
+            assertEquals(List.of("https://explicit.example.com"), properties.getWebProxy().getAllowedOrigins());
+        } finally {
+            restoreSystemProperty(key, original);
+        }
+    }
+
+    @Test
+    void shouldApplyTaskStateBudgetSettingsFromSystemProperty() {
+        String planKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_PLAN_MAX_CHARS";
+        String progressKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_IN_PROGRESS_MAX_CHARS";
+        String failureKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_LAST_FAILURE_MAX_CHARS";
+        String todoItemsKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_MAX_ITEMS";
+        String todoCharsKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_ITEM_MAX_CHARS";
+        String oldPlan = System.getProperty(planKey);
+        String oldProgress = System.getProperty(progressKey);
+        String oldFailure = System.getProperty(failureKey);
+        String oldTodoItems = System.getProperty(todoItemsKey);
+        String oldTodoChars = System.getProperty(todoCharsKey);
+        try {
+            System.setProperty(planKey, "300");
+            System.setProperty(progressKey, "130");
+            System.setProperty(failureKey, "280");
+            System.setProperty(todoItemsKey, "7");
+            System.setProperty(todoCharsKey, "90");
+            OpenManusProperties properties = new OpenManusProperties();
+
+            properties.applyEnvFallbacks();
+
+            assertEquals(300, properties.getChatMemory().getTaskStatePlanMaxChars());
+            assertEquals(130, properties.getChatMemory().getTaskStateInProgressMaxChars());
+            assertEquals(280, properties.getChatMemory().getTaskStateLastFailureMaxChars());
+            assertEquals(7, properties.getChatMemory().getTaskStateTodoMaxItems());
+            assertEquals(90, properties.getChatMemory().getTaskStateTodoItemMaxChars());
+        } finally {
+            restoreSystemProperty(planKey, oldPlan);
+            restoreSystemProperty(progressKey, oldProgress);
+            restoreSystemProperty(failureKey, oldFailure);
+            restoreSystemProperty(todoItemsKey, oldTodoItems);
+            restoreSystemProperty(todoCharsKey, oldTodoChars);
+        }
+    }
+
+    @Test
+    void shouldNotOverrideExplicitTaskStateBudgetWhenSystemPropertyIsSet() {
+        String planKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_PLAN_MAX_CHARS";
+        String original = System.getProperty(planKey);
+        try {
+            System.setProperty(planKey, "300");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getChatMemory().setTaskStatePlanMaxChars(123);
+
+            properties.applyEnvFallbacks();
+
+            assertEquals(123, properties.getChatMemory().getTaskStatePlanMaxChars());
+        } finally {
+            restoreSystemProperty(planKey, original);
+        }
+    }
+
+    @Test
+    void shouldFallbackToDefaultTaskStateBudgetsWhenSystemPropertyIsInvalid() {
+        String planKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_PLAN_MAX_CHARS";
+        String progressKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_IN_PROGRESS_MAX_CHARS";
+        String failureKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_LAST_FAILURE_MAX_CHARS";
+        String todoItemsKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_MAX_ITEMS";
+        String todoCharsKey = "OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_ITEM_MAX_CHARS";
+        String oldPlan = System.getProperty(planKey);
+        String oldProgress = System.getProperty(progressKey);
+        String oldFailure = System.getProperty(failureKey);
+        String oldTodoItems = System.getProperty(todoItemsKey);
+        String oldTodoChars = System.getProperty(todoCharsKey);
+        try {
+            System.setProperty(planKey, "abc");
+            System.setProperty(progressKey, "abc");
+            System.setProperty(failureKey, "abc");
+            System.setProperty(todoItemsKey, "abc");
+            System.setProperty(todoCharsKey, "abc");
+            OpenManusProperties properties = new OpenManusProperties();
+
+            properties.applyEnvFallbacks();
+
+            assertEquals(240, properties.getChatMemory().getTaskStatePlanMaxChars());
+            assertEquals(120, properties.getChatMemory().getTaskStateInProgressMaxChars());
+            assertEquals(240, properties.getChatMemory().getTaskStateLastFailureMaxChars());
+            assertEquals(6, properties.getChatMemory().getTaskStateTodoMaxItems());
+            assertEquals(120, properties.getChatMemory().getTaskStateTodoItemMaxChars());
+        } finally {
+            restoreSystemProperty(planKey, oldPlan);
+            restoreSystemProperty(progressKey, oldProgress);
+            restoreSystemProperty(failureKey, oldFailure);
+            restoreSystemProperty(todoItemsKey, oldTodoItems);
+            restoreSystemProperty(todoCharsKey, oldTodoChars);
+        }
     }
 
     @Test
@@ -273,6 +523,26 @@ class OpenManusPropertiesEnvFallbackTest {
     }
 
     @Test
+    void shouldApplyStoreTypeFromSystemPropertyUnderTurkishLocale() {
+        String key = "OPENMANUS_CHAT_MEMORY_STORE_TYPE";
+        String original = System.getProperty(key);
+        Locale originalLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            System.setProperty(key, "IN-MEMORY");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getChatMemory().setStoreType(" ");
+
+            properties.applyEnvFallbacks();
+
+            assertEquals("in-memory", properties.getChatMemory().getStoreType());
+        } finally {
+            Locale.setDefault(originalLocale);
+            restoreSystemProperty(key, original);
+        }
+    }
+
+    @Test
     void shouldApplyToolResultCompactionSettingsFromSystemProperty() {
         String maxCharsKey = "OPENMANUS_CHAT_MEMORY_TOOL_RESULT_MAX_CHARS";
         String headCharsKey = "OPENMANUS_CHAT_MEMORY_COMPACT_HEAD_CHARS";
@@ -359,6 +629,47 @@ class OpenManusPropertiesEnvFallbackTest {
             properties.applyEnvFallbacks();
 
             assertEquals(24, properties.getChatMemory().getModelContextMaxTotalMessages());
+        } finally {
+            restoreSystemProperty(key, original);
+        }
+    }
+
+    @Test
+    void shouldApplyModelContextTokenCountModeFromSystemProperty() {
+        String key = "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE";
+        String original = System.getProperty(key);
+        try {
+            System.setProperty(key, "tokenizer");
+            OpenManusProperties properties = new OpenManusProperties();
+
+            properties.applyEnvFallbacks();
+
+            assertEquals("tokenizer", properties.getChatMemory().getModelContextTokenCountMode());
+        } finally {
+            restoreSystemProperty(key, original);
+        }
+    }
+
+    @Test
+    void shouldFallbackToApproxWhenModelContextTokenCountModeIsInvalid() {
+        OpenManusProperties properties = new OpenManusProperties();
+        properties.getChatMemory().setModelContextTokenCountMode("invalid-mode");
+
+        assertEquals("approx", properties.getChatMemory().getModelContextTokenCountMode());
+    }
+
+    @Test
+    void shouldNotOverrideConfiguredModelContextTokenCountMode() {
+        String key = "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE";
+        String original = System.getProperty(key);
+        try {
+            System.setProperty(key, "approx");
+            OpenManusProperties properties = new OpenManusProperties();
+            properties.getChatMemory().setModelContextTokenCountMode("tokenizer");
+
+            properties.applyEnvFallbacks();
+
+            assertEquals("tokenizer", properties.getChatMemory().getModelContextTokenCountMode());
         } finally {
             restoreSystemProperty(key, original);
         }

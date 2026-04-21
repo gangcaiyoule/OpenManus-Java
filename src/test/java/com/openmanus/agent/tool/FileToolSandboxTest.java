@@ -1,15 +1,18 @@
 package com.openmanus.agent.tool;
 
-import com.openmanus.domain.service.SessionSandboxManager;
-import com.openmanus.infra.sandbox.VncSandboxClient;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
+import com.openmanus.aiframework.runtime.AiSessionSandboxInfo;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.slf4j.MDC;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 class FileToolSandboxTest {
 
@@ -20,8 +23,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldReadAndWriteInsideSessionSandbox() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
         MDC.put("sessionId", "file-sandbox-" + UUID.randomUUID());
 
         String writeResult = fileTool.writeFile("notes/todo.txt", "hello sandbox");
@@ -33,8 +35,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldBlockPathTraversalOutsideSandbox() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
         MDC.put("sessionId", "file-sandbox-" + UUID.randomUUID());
 
         String result = fileTool.readFile("../outside.txt");
@@ -43,8 +44,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldIsolateFilesBetweenDifferentSessions() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
 
         MDC.put("sessionId", "file-sandbox-a-" + UUID.randomUUID());
         String writeResult = fileTool.writeFile("notes/shared.txt", "session-a-only");
@@ -57,8 +57,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldRejectFileOperationWhenSessionIdMissing() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
         MDC.remove("sessionId");
 
         String result = fileTool.readFile("notes/a.txt");
@@ -67,8 +66,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldRejectBlankPathForWriteAndAppend() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
         MDC.put("sessionId", "file-sandbox-" + UUID.randomUUID());
 
         String writeResult = fileTool.writeFile("   ", "abc");
@@ -80,8 +78,7 @@ class FileToolSandboxTest {
 
     @Test
     void shouldAllowNullContentAsEmptyStringOnWriteAndAppend() {
-        SessionSandboxManager sandboxManager = new SessionSandboxManager(mock(VncSandboxClient.class));
-        FileTool fileTool = new FileTool(sandboxManager);
+        FileTool fileTool = new FileTool(new TestSessionSandboxGateway());
         MDC.put("sessionId", "file-sandbox-" + UUID.randomUUID());
 
         String writeResult = fileTool.writeFile("notes/null-content.txt", null);
@@ -91,5 +88,34 @@ class FileToolSandboxTest {
         assertTrue(writeResult.contains("文件写入成功"));
         assertTrue(appendResult.contains("内容追加成功"));
         assertTrue(readResult.startsWith("文件内容:"));
+    }
+
+    private static final class TestSessionSandboxGateway implements AiSessionSandboxGateway {
+        private static final Path ROOT = Path.of(System.getProperty("java.io.tmpdir"),
+                "openmanus", "agent-tool-tests");
+
+        @Override
+        public Optional<AiSessionSandboxInfo> getSandboxInfo(String sessionId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public AiSessionSandboxInfo getOrCreateSandbox(String sessionId) {
+            return new AiSessionSandboxInfo(sessionId, "container", "http://localhost", 0, "RUNNING");
+        }
+
+        @Override
+        public Path getOrCreateFileSandboxRoot(String sessionId) {
+            if (sessionId == null || sessionId.isBlank()) {
+                throw new SecurityException("缺少会话ID，拒绝创建文件沙盒目录");
+            }
+            Path root = ROOT.resolve(sessionId).toAbsolutePath().normalize();
+            try {
+                Files.createDirectories(root);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return root;
+        }
     }
 }

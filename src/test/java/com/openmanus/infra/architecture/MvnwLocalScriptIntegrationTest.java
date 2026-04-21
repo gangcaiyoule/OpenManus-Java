@@ -36,7 +36,7 @@ class MvnwLocalScriptIntegrationTest {
         Files.createDirectories(fakeJdkBin);
 
         Path script = copyScript(root, false);
-        makeExecutable(fakeJdkBin.resolve("java"), "#!/usr/bin/env bash\nexit 0\n");
+        makeVersionedJavaExecutable(fakeJdkBin.resolve("java"), 21);
         makeExecutable(fakeJdkBin.resolve("javac"), "#!/usr/bin/env bash\nexit 0\n");
 
         Path argsFile = root.resolve("mvn.args");
@@ -59,6 +59,90 @@ class MvnwLocalScriptIntegrationTest {
         assertEquals(0, result.exitCode, result.output);
         assertTrue(Files.readString(argsFile).contains("-q -DskipTests compile"),
                 "mvn arguments should be passed through by mvnw-local.sh");
+    }
+
+    @Test
+    void shouldClearStaleSurefireReportsBeforeRunningTests() throws Exception {
+        String bash = requireBash();
+
+        Path root = tempDir.resolve("repo-test-cleanup");
+        Path fakeBin = root.resolve("fake-bin");
+        Path fakeJdkBin = root.resolve("fake-jdk/bin");
+        Path staleReport = root.resolve("target/surefire-reports/stale.txt");
+        Path markerFile = root.resolve("mvn.marker");
+        Files.createDirectories(fakeBin);
+        Files.createDirectories(fakeJdkBin);
+        Files.createDirectories(staleReport.getParent());
+        Files.writeString(staleReport, "stale", StandardCharsets.UTF_8);
+
+        Path script = copyScript(root, false);
+        makeVersionedJavaExecutable(fakeJdkBin.resolve("java"), 21);
+        makeExecutable(fakeJdkBin.resolve("javac"), "#!/usr/bin/env bash\nexit 0\n");
+        makeExecutable(fakeBin.resolve("mvn"),
+                "#!/usr/bin/env bash\nprintf 'ran' > \"" + markerFile + "\"\nexit 0\n");
+
+        ProcessResult result = run(
+                root,
+                Map.of(
+                        "JAVA_HOME", root.resolve("fake-jdk").toString(),
+                        "PATH", fakeBin + ":/usr/bin:/bin"
+                ),
+                bash,
+                script.toString(),
+                "-q",
+                "-DskipITs",
+                "test"
+        );
+
+        assertEquals(0, result.exitCode, result.output);
+        assertTrue(Files.exists(markerFile), "mvn should still be invoked after cleanup");
+        assertTrue(Files.notExists(staleReport),
+                "mvnw-local.sh should clear stale surefire reports before running tests");
+    }
+
+    @Test
+    void shouldFallbackToJava21WhenExistingJavaHomeTargetsOlderJdk() throws Exception {
+        String bash = requireBash();
+
+        Path root = tempDir.resolve("repo-java-version-fallback");
+        Path fakeBin = root.resolve("fake-bin");
+        Path fakeJavaHomeProbe = root.resolve("fake-java-home");
+        Path fakeJdk17Bin = root.resolve("fake-jdk-17/bin");
+        Path fakeJdk21Bin = root.resolve("fake-jdk-21/bin");
+        Path argsFile = root.resolve("mvn.args");
+        Files.createDirectories(fakeBin);
+        Files.createDirectories(fakeJdk17Bin);
+        Files.createDirectories(fakeJdk21Bin);
+
+        Path script = copyScript(root, true);
+        String scriptContent = Files.readString(script, StandardCharsets.UTF_8)
+                .replace("/nonexistent/java_home", fakeJavaHomeProbe.toString());
+        Files.writeString(script, scriptContent, StandardCharsets.UTF_8);
+        setExecutable(script);
+
+        makeVersionedJavaExecutable(fakeJdk17Bin.resolve("java"), 17);
+        makeExecutable(fakeJdk17Bin.resolve("javac"), "#!/usr/bin/env bash\nexit 0\n");
+        makeVersionedJavaExecutable(fakeJdk21Bin.resolve("java"), 21);
+        makeExecutable(fakeJdk21Bin.resolve("javac"), "#!/usr/bin/env bash\nexit 0\n");
+        makeExecutable(fakeJavaHomeProbe, "#!/usr/bin/env bash\nprintf '%s\\n' \"" + root.resolve("fake-jdk-21") + "\"\n");
+        makeExecutable(fakeBin.resolve("mvn"),
+                "#!/usr/bin/env bash\nprintf '%s' \"$JAVA_HOME\" > \"" + argsFile + "\"\nexit 0\n");
+
+        ProcessResult result = run(
+                root,
+                Map.of(
+                        "JAVA_HOME", root.resolve("fake-jdk-17").toString(),
+                        "PATH", fakeBin + ":/usr/bin:/bin"
+                ),
+                bash,
+                script.toString(),
+                "-q",
+                "-DskipTests",
+                "compile"
+        );
+
+        assertEquals(0, result.exitCode, result.output);
+        assertEquals(root.resolve("fake-jdk-21").toString(), Files.readString(argsFile));
     }
 
     @Test
@@ -121,6 +205,36 @@ class MvnwLocalScriptIntegrationTest {
                 "script should explain why javac fallback did not infer JAVA_HOME");
     }
 
+    @Test
+    void shouldRejectCanonicalJavacFallbackWhenResolvedJdkIsBelowJava21() throws Exception {
+        String bash = requireBash();
+
+        Path root = tempDir.resolve("repo-old-javac-fallback");
+        Path fakeBin = root.resolve("fake-bin");
+        Path fakeJdk17Bin = root.resolve("fake-jdk-17/bin");
+        Files.createDirectories(fakeBin);
+        Files.createDirectories(fakeJdk17Bin);
+
+        Path script = copyScript(root, true);
+        makeVersionedJavaExecutable(fakeJdk17Bin.resolve("java"), 17);
+        makeExecutable(fakeJdk17Bin.resolve("javac"), "#!/usr/bin/env bash\nexit 0\n");
+        makeExecutable(fakeBin.resolve("javac"), "#!/usr/bin/env bash\nprintf '%s\\n' \"" + fakeJdk17Bin.resolve("javac") + "\"\n");
+        makeExecutable(fakeBin.resolve("readlink"), "#!/usr/bin/env bash\nif [[ \"$1\" == \"-f\" ]]; then printf '%s\\n' \"" + fakeJdk17Bin.resolve("javac") + "\"; fi\n");
+
+        ProcessResult result = run(
+                root,
+                Map.of("PATH", fakeBin + ":/usr/bin:/bin"),
+                bash,
+                script.toString(),
+                "-q",
+                "-DskipTests",
+                "compile"
+        );
+
+        assertEquals(1, result.exitCode);
+        assertTrue(result.output.contains("Required Java version: 21+."));
+    }
+
     private Path copyScript(Path root, boolean disableMacJavaHomeProbe) throws IOException {
         Path scriptsDir = root.resolve("scripts");
         Files.createDirectories(scriptsDir);
@@ -137,6 +251,20 @@ class MvnwLocalScriptIntegrationTest {
     private void makeExecutable(Path path, String content) throws IOException {
         Files.writeString(path, content, StandardCharsets.UTF_8);
         setExecutable(path);
+    }
+
+    private void makeVersionedJavaExecutable(Path path, int javaSpecVersion) throws IOException {
+        makeExecutable(path, """
+                #!/usr/bin/env bash
+                if [[ "$1" == "-XshowSettings:properties" ]]; then
+                  cat <<'EOF' 1>&2
+                Property settings:
+                    java.specification.version = %d
+                EOF
+                  exit 0
+                fi
+                exit 0
+                """.formatted(javaSpecVersion));
     }
 
     private ProcessResult run(Path workDir, Map<String, String> env, String... command)

@@ -1,16 +1,14 @@
 package com.openmanus.domain.service;
 
-import com.openmanus.agent.workflow.UnifiedWorkflow;
-import com.openmanus.domain.model.AgentExecutionEvent;
 import com.openmanus.domain.model.WorkflowErrorCodes;
 import com.openmanus.domain.model.WorkflowResponse;
-import com.openmanus.infra.monitoring.AgentExecutionTracker;
+import com.openmanus.domain.model.AgentExecutionEvent;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.MDC;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.regex.Pattern;
 
@@ -21,22 +19,23 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.doThrow;
 
 class WorkflowStreamServiceSessionMemoryTest {
     private static final Pattern SESSION_ID_PATTERN = Pattern.compile("^[a-zA-Z0-9_-]{1,64}$");
 
-    private WorkflowStreamService createService(UnifiedWorkflow workflow,
-                                                AgentExecutionTracker tracker,
-                                                SimpMessagingTemplate messagingTemplate,
+    private WorkflowStreamService createService(WorkflowExecutionPort workflow,
+                                                WorkflowExecutionEventPort executionEventPort,
+                                                WorkflowStreamPublisher streamPublisher,
                                                 Executor executor) {
-        return new WorkflowStreamService(workflow, tracker, messagingTemplate, executor) {
+        return new WorkflowStreamService(workflow, executionEventPort, streamPublisher, executor) {
             @Override
             protected long postExecutionDrainDelayMs() {
                 return 0L;
@@ -46,14 +45,14 @@ class WorkflowStreamServiceSessionMemoryTest {
 
     @Test
     void shouldPassSessionIdToUnifiedWorkflowMemory() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
 
         when(workflow.executeSync("task", "session-123")).thenReturn("done");
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         service.executeWorkflowInternal("task", "session-123", event -> {});
 
@@ -62,14 +61,14 @@ class WorkflowStreamServiceSessionMemoryTest {
 
     @Test
     void shouldHandleShortSessionIdWithoutCrashing() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
 
         when(workflow.executeSync("task", "abc")).thenReturn("done");
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         service.executeWorkflowInternal("task", "abc", event -> {});
 
@@ -78,14 +77,14 @@ class WorkflowStreamServiceSessionMemoryTest {
 
     @Test
     void shouldNotLeakMdcWhenSessionIdIsGenerated() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
 
         when(workflow.executeSync(anyString(), anyString())).thenReturn("done");
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         MDC.remove("sessionId");
         var response = service.executeWorkflowAndStreamEvents("task");
@@ -96,14 +95,14 @@ class WorkflowStreamServiceSessionMemoryTest {
 
     @Test
     void shouldGenerateSessionIdWhenMdcSessionIdIsBlank() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
 
         when(workflow.executeSync(anyString(), anyString())).thenReturn("done");
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         MDC.put("sessionId", "   ");
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
@@ -112,18 +111,19 @@ class WorkflowStreamServiceSessionMemoryTest {
         assertTrue(response.isSuccess());
         assertNotNull(response.getSessionId());
         assertFalse(response.getSessionId().isBlank());
-        assertEquals("/topic/executions/" + response.getSessionId(), response.getTopic());
+        assertNull(response.getError());
+        assertNull(response.getErrorCode());
     }
 
     @Test
     void shouldGenerateSessionIdWhenMdcSessionIdContainsIllegalCharacters() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
         when(workflow.executeSync(anyString(), anyString())).thenReturn("done");
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         MDC.put("sessionId", "bad/id");
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
@@ -132,17 +132,18 @@ class WorkflowStreamServiceSessionMemoryTest {
         assertTrue(response.isSuccess());
         assertNotNull(response.getSessionId());
         assertTrue(SESSION_ID_PATTERN.matcher(response.getSessionId()).matches());
-        assertEquals("/topic/executions/" + response.getSessionId(), response.getTopic());
+        assertNull(response.getError());
+        assertNull(response.getErrorCode());
     }
 
     @Test
     void shouldReturnInputInvalidErrorCodeForBlankInput() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("   ");
 
@@ -153,96 +154,201 @@ class WorkflowStreamServiceSessionMemoryTest {
     @Test
     void shouldRemoveListenerAndReturnErrorWhenAsyncSubmissionRejected() {
         // Expected failure path: service logs an error and returns ASYNC_SUBMIT_REJECTED.
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor rejectingExecutor = command -> {
             throw new StacklessRejectedExecutionException("queue full");
         };
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, rejectingExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, rejectingExecutor);
 
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
 
         assertFalse(response.isSuccess());
         assertNotNull(response.getSessionId());
         assertEquals(WorkflowErrorCodes.ASYNC_SUBMIT_REJECTED, response.getErrorCode());
-        verify(tracker, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
-        verify(tracker, times(1)).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, times(1)).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void shouldRemoveListenerAndReturnErrorWhenAsyncSubmissionThrowsRuntimeException() {
         // Expected failure path: service logs an error and returns ASYNC_SUBMIT_EXCEPTION.
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor brokenExecutor = command -> {
             throw new StacklessIllegalStateException("executor unavailable");
         };
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, brokenExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, brokenExecutor);
 
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
 
         assertFalse(response.isSuccess());
         assertNotNull(response.getSessionId());
         assertEquals(WorkflowErrorCodes.ASYNC_SUBMIT_EXCEPTION, response.getErrorCode());
-        verify(tracker, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
-        verify(tracker, times(1)).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, times(1)).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void shouldReturnInternalErrorWhenListenerRegistrationFails() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor directExecutor = Runnable::run;
         doThrow(new StacklessIllegalStateException("tracker unavailable"))
-                .when(tracker).addListener(anyString(), org.mockito.ArgumentMatchers.any());
+                .when(executionEventPort).addListener(anyString(), org.mockito.ArgumentMatchers.any());
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, directExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
 
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
 
         assertFalse(response.isSuccess());
         assertNotNull(response.getSessionId());
         assertEquals(WorkflowErrorCodes.INTERNAL_ERROR, response.getErrorCode());
-        verify(tracker, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
-        verify(tracker, never()).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, times(1)).addListener(anyString(), org.mockito.ArgumentMatchers.any());
+        verify(executionEventPort, never()).removeListener(anyString(), org.mockito.ArgumentMatchers.any());
     }
 
     @Test
     void shouldForwardOnlyCurrentSessionEventsToWebSocketTopic() {
-        UnifiedWorkflow workflow = mock(UnifiedWorkflow.class);
-        AgentExecutionTracker tracker = mock(AgentExecutionTracker.class);
-        SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
         Executor noOpExecutor = command -> {};
 
-        WorkflowStreamService service = createService(workflow, tracker, messagingTemplate, noOpExecutor);
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, noOpExecutor);
 
         MDC.put("sessionId", "session-a");
         WorkflowResponse response = service.executeWorkflowAndStreamEvents("task");
         assertTrue(response.isSuccess());
 
-        ArgumentCaptor<AgentExecutionTracker.AgentExecutionEventListener> listenerCaptor =
-                ArgumentCaptor.forClass(AgentExecutionTracker.AgentExecutionEventListener.class);
-        verify(tracker).addListener(eq("session-a"), listenerCaptor.capture());
-        AgentExecutionTracker.AgentExecutionEventListener listener = listenerCaptor.getValue();
+        ArgumentCaptor<WorkflowExecutionEventPort.Listener> listenerCaptor =
+                ArgumentCaptor.forClass(WorkflowExecutionEventPort.Listener.class);
+        verify(executionEventPort).addListener(eq("session-a"), listenerCaptor.capture());
+        WorkflowExecutionEventPort.Listener listener = listenerCaptor.getValue();
 
-        AgentExecutionEvent otherSessionEvent = AgentExecutionEvent.builder()
-                .sessionId("session-b")
-                .build();
+        AgentExecutionEvent otherSessionEvent = AgentExecutionEvent.builder().sessionId("session-b").build();
         listener.onEvent(otherSessionEvent);
-        verify(messagingTemplate, never()).convertAndSend(eq("/topic/executions/session-a"), any(AgentExecutionEvent.class));
+        verify(streamPublisher, never()).publishEvent(eq("session-a"), any(AgentExecutionEvent.class));
 
-        AgentExecutionEvent currentSessionEvent = AgentExecutionEvent.builder()
-                .sessionId("session-a")
-                .build();
+        AgentExecutionEvent currentSessionEvent = AgentExecutionEvent.builder().sessionId("session-a").build();
         listener.onEvent(currentSessionEvent);
-        verify(messagingTemplate, times(1)).convertAndSend(eq("/topic/executions/session-a"), eq(currentSessionEvent));
+        verify(streamPublisher, times(1)).publishEvent("session-a", currentSessionEvent);
 
         MDC.remove("sessionId");
+    }
+
+    @Test
+    void shouldRemoveListenerAfterSuccessfulExecution() {
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
+        Executor directExecutor = Runnable::run;
+        when(workflow.executeSync("task", "session-123")).thenReturn("done");
+
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
+
+        service.executeWorkflowInternal("task", "session-123", event -> { });
+
+        verify(executionEventPort).startWorkflowTracking("session-123", "task");
+        verify(executionEventPort).endWorkflowTracking("session-123", "done", true);
+        verify(executionEventPort).removeListener(eq("session-123"), any(WorkflowExecutionEventPort.Listener.class));
+    }
+
+    @Test
+    void shouldRemoveListenerAfterFailedExecution() {
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
+        Executor directExecutor = Runnable::run;
+        when(workflow.executeSync("task", "session-123"))
+                .thenThrow(new StacklessIllegalStateException("boom"));
+
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
+
+        service.executeWorkflowInternal("task", "session-123", event -> { });
+
+        verify(executionEventPort).startWorkflowTracking("session-123", "task");
+        verify(executionEventPort).endWorkflowTracking("session-123", "执行出错: boom", false);
+        verify(executionEventPort).recordError("session-123", "workflow_manager", "WORKFLOW_EXECUTION", "boom");
+        verify(executionEventPort).endExecution(
+                "session-123",
+                "workflow_manager",
+                "WORKFLOW_COMPLETE",
+                "执行出错: boom",
+                AgentExecutionEvent.ExecutionStatus.ERROR
+        );
+        verify(executionEventPort).removeListener(eq("session-123"), any(WorkflowExecutionEventPort.Listener.class));
+    }
+
+    @Test
+    void shouldFallbackToUnknownErrorWhenWorkflowFailureMessageIsBlank() {
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
+        Executor directExecutor = Runnable::run;
+        when(workflow.executeSync("task", "session-null-error"))
+                .thenThrow(new StacklessIllegalStateException(null));
+
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
+
+        service.executeWorkflowInternal("task", "session-null-error", event -> { });
+
+        verify(executionEventPort).endWorkflowTracking("session-null-error", "执行出错: unknown error", false);
+        verify(executionEventPort).recordError(
+                "session-null-error",
+                "workflow_manager",
+                "WORKFLOW_EXECUTION",
+                "unknown error"
+        );
+        verify(executionEventPort).endExecution(
+                "session-null-error",
+                "workflow_manager",
+                "WORKFLOW_COMPLETE",
+                "执行出错: unknown error",
+                AgentExecutionEvent.ExecutionStatus.ERROR
+        );
+        verify(streamPublisher).publishResult(
+                eq("session-null-error"),
+                argThat(result -> "执行出错: unknown error".equals(result.getResult()) && "ERROR".equals(result.getStatus()))
+        );
+    }
+
+    @Test
+    void shouldUnwrapNestedWorkflowFailureMessage() {
+        WorkflowExecutionPort workflow = mock(WorkflowExecutionPort.class);
+        WorkflowExecutionEventPort executionEventPort = mock(WorkflowExecutionEventPort.class);
+        WorkflowStreamPublisher streamPublisher = mock(WorkflowStreamPublisher.class);
+        Executor directExecutor = Runnable::run;
+        when(workflow.executeSync("task", "session-wrapped-error"))
+                .thenThrow(new CompletionException(new StacklessIllegalStateException("deep boom")));
+
+        WorkflowStreamService service = createService(workflow, executionEventPort, streamPublisher, directExecutor);
+
+        service.executeWorkflowInternal("task", "session-wrapped-error", event -> { });
+
+        verify(executionEventPort).endWorkflowTracking("session-wrapped-error", "执行出错: deep boom", false);
+        verify(executionEventPort).recordError(
+                "session-wrapped-error",
+                "workflow_manager",
+                "WORKFLOW_EXECUTION",
+                "deep boom"
+        );
+        verify(executionEventPort).endExecution(
+                "session-wrapped-error",
+                "workflow_manager",
+                "WORKFLOW_COMPLETE",
+                "执行出错: deep boom",
+                AgentExecutionEvent.ExecutionStatus.ERROR
+        );
+        verify(streamPublisher).publishResult(
+                eq("session-wrapped-error"),
+                argThat(result -> "执行出错: deep boom".equals(result.getResult()) && "ERROR".equals(result.getStatus()))
+        );
     }
 
     private static final class StacklessRejectedExecutionException extends RejectedExecutionException {

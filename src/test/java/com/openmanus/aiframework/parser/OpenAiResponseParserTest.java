@@ -1,11 +1,13 @@
 package com.openmanus.aiframework.parser;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openmanus.aiframework.exception.AiFrameworkException;
 import com.openmanus.aiframework.model.ProviderStreamChunk;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpenAiResponseParserTest {
@@ -44,5 +46,24 @@ class OpenAiResponseParserTest {
         assertTrue(chunk.isCompleted());
         assertEquals("completed", chunk.getFinishReason());
         assertEquals(42, chunk.getUsage().path("total_tokens").asInt());
+    }
+
+    @Test
+    void shouldFailWhenStreamChunkContainsProviderErrorPayload() throws Exception {
+        OpenAiResponseParser parser = new OpenAiResponseParser();
+
+        AiFrameworkException error = assertThrows(AiFrameworkException.class,
+                () -> parser.parseStreamChunk("message", objectMapper.readTree("""
+                        {
+                          "error": {
+                            "message": "No available channel",
+                            "type": "new_api_error",
+                            "code": "model_not_found"
+                          }
+                        }
+                        """)));
+
+        assertEquals("Provider returned error payload: type=new_api_error, code=model_not_found, message=No available channel",
+                error.getMessage());
     }
 }
