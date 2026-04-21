@@ -1,16 +1,21 @@
 package com.openmanus.infra.config;
 
+import com.openmanus.infra.memory.FileChatMemoryStore;
+import com.openmanus.infra.memory.FileToolResultArtifactStore;
+import com.openmanus.infra.memory.PersistentChatMemory;
+import com.openmanus.infra.memory.ToolResultArtifactStore;
+import com.openmanus.aiframework.bridge.OpenAiFrameworkChatModel;
+import com.openmanus.aiframework.config.AiProviderClientRegistry;
+import com.openmanus.aiframework.model.AiProviderType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.embedding.EmbeddingModel;
-import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.model.openai.OpenAiEmbeddingModel;
+import dev.langchain4j.store.memory.chat.ChatMemoryStore;
 import dev.langchain4j.store.memory.chat.InMemoryChatMemoryStore;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.time.Duration;
+import java.nio.file.Path;
 
 /**
  * LangChain4j配置类
@@ -20,8 +25,6 @@ import java.time.Duration;
  */
 @Configuration
 public class LangChain4jConfig {
-
-    private static final int MAX_MEMORY_MESSAGES = 100;  // 增加到 100 条（原：50 条）
     
     private final OpenManusProperties properties;
 
@@ -31,15 +34,34 @@ public class LangChain4jConfig {
 
     /**
      * 对话记忆提供者
-     * 开发环境使用内存存储，生产环境可替换为Redis等持久化存储
+     * 使用持久化存储保留完整消息历史。
      */
     @Bean
-    public ChatMemoryProvider chatMemoryProvider() {
-        return conversationId -> MessageWindowChatMemory.builder()
-                .id(conversationId)
-                .maxMessages(MAX_MEMORY_MESSAGES)
-                .chatMemoryStore(new InMemoryChatMemoryStore())
-                .build();
+    public ChatMemoryProvider chatMemoryProvider(ChatMemoryStore chatMemoryStore) {
+        return conversationId -> new PersistentChatMemory(conversationId, chatMemoryStore);
+    }
+
+    @Bean
+    public ChatMemoryStore chatMemoryStore() {
+        OpenManusProperties.ChatMemoryConfig cfg = properties.getChatMemory();
+        String storeType = (cfg.getStoreType() == null || cfg.getStoreType().trim().isEmpty())
+                ? "file"
+                : cfg.getStoreType().trim().toLowerCase();
+        if ("in-memory".equals(storeType) || "inmemory".equals(storeType)) {
+            return new InMemoryChatMemoryStore();
+        }
+        if (!"file".equals(storeType)) {
+            throw new IllegalArgumentException("Unsupported chat-memory.store-type: " + cfg.getStoreType());
+        }
+        Path dir = Path.of(cfg.getFileStoreDir());
+        return new FileChatMemoryStore(dir, cfg.getRetentionDays(), cfg.isQuarantineCorruptedFiles());
+    }
+
+    @Bean
+    public ToolResultArtifactStore toolResultArtifactStore() {
+        OpenManusProperties.ChatMemoryConfig cfg = properties.getChatMemory();
+        Path dir = Path.of(cfg.getToolResultArtifactStoreDir());
+        return new FileToolResultArtifactStore(dir, cfg.getToolResultArtifactMaxIndexEntriesPerMemory());
     }
 
     /**
@@ -47,33 +69,29 @@ public class LangChain4jConfig {
      * 基于配置文件创建LLM实例
      */
     @Bean
-    public ChatModel chatModel() {
+    public ChatModel chatModel(AiProviderClientRegistry aiProviderClientRegistry, ObjectMapper objectMapper) {
         OpenManusProperties.LlmConfig.DefaultLLM llmConfig = properties.getLlm().getDefaultLlm();
-
-        return OpenAiChatModel.builder()
-                .baseUrl(llmConfig.getBaseUrl())
-                .apiKey(llmConfig.getApiKey())
-                .modelName(llmConfig.getModel())
-                .temperature(llmConfig.getTemperature())
-                .maxTokens(llmConfig.getMaxTokens())
-                .timeout(Duration.ofSeconds(llmConfig.getTimeout()))
-                .build();
+        AiProviderType providerType = resolveDefaultProviderType(llmConfig.getApiType());
+        return new OpenAiFrameworkChatModel(
+                aiProviderClientRegistry,
+                objectMapper,
+                llmConfig.getModel(),
+                llmConfig.getTemperature(),
+                llmConfig.getMaxTokens(),
+                llmConfig.getTimeout(),
+                providerType
+        );
     }
 
-    /**
-     * 嵌入模型
-     * 用于文本向量化和语义搜索
-     */
-    @Bean
-    public EmbeddingModel embeddingModel() {
-        OpenManusProperties.LlmConfig.DefaultLLM llmConfig = properties.getLlm().getDefaultLlm();
-        
-        return OpenAiEmbeddingModel.builder()
-                .baseUrl(llmConfig.getBaseUrl())
-                .apiKey(llmConfig.getApiKey())
-                .modelName(llmConfig.getEmbeddingModel())
-                .logRequests(true)
-                .logResponses(true)
-                .build();
+    private AiProviderType resolveDefaultProviderType(String apiType) {
+        if (apiType == null || apiType.isBlank()) {
+            return AiProviderType.OPENAI;
+        }
+        try {
+            return AiProviderType.from(apiType);
+        } catch (IllegalArgumentException ignored) {
+            return AiProviderType.OPENAI;
+        }
     }
+
 } 

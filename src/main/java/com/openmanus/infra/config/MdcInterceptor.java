@@ -22,10 +22,7 @@ public class MdcInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        String sessionId = request.getHeader(SESSION_ID_HEADER);
-        if (sessionId == null || sessionId.trim().isEmpty()) {
-            sessionId = UUID.randomUUID().toString();
-        }
+        String sessionId = normalizeSessionId(request.getHeader(SESSION_ID_HEADER));
         MDC.put(SESSION_ID_MDC_KEY, sessionId);
         return true;
     }
@@ -34,5 +31,16 @@ public class MdcInterceptor implements HandlerInterceptor {
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, 
                                Object handler, Exception ex) {
         MDC.remove(SESSION_ID_MDC_KEY);
+    }
+
+    static String normalizeSessionId(String rawSessionId) {
+        if (rawSessionId == null) {
+            return UUID.randomUUID().toString();
+        }
+        String trimmed = rawSessionId.trim();
+        if (trimmed.isEmpty()) {
+            return UUID.randomUUID().toString();
+        }
+        return trimmed;
     }
 }

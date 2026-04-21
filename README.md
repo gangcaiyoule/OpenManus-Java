@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>An Intelligent Thinking System Based on Java - A Multi-modal Agent Framework with Fast/Slow Thinking</strong>
+  <strong>An Intelligent Thinking System Based on Java - A Unified Single-Agent Framework</strong>
 </p>
 
 [![Java](https://img.shields.io/badge/Java-21+-orange)](https://openjdk.java.net/projects/jdk/21/)
@@ -19,19 +19,18 @@
 
 ## 📋 Project Overview
 
-OpenManusJava is an intelligent thinking system developed based on Spring Boot and LangChain4j. It adopts a "fast thinking/slow thinking" dual-mode architecture, combining the efficiency of direct output with the depth of a think-execute-reflect loop. The system can automatically or manually select the most appropriate thinking mode according to task complexity, significantly improving the processing quality of complex tasks.
+OpenManusJava is an intelligent system built with Spring Boot and LangChain4j. It now uses a flattened single-agent architecture: one ReAct loop, unified tool registration, and continuous chat memory across turns.
 
 ### 🎯 Features
 
-#### 🧠 Multi-modal Intelligent Thinking
-- **Fast Thinking Mode**: Direct execution for high efficiency, suitable for simple tasks.
-- **Slow Thinking Mode**: Think-execute-reflect loop, suitable for complex tasks.
-- **Automatic Mode**: Intelligently selects the thinking mode based on task complexity.
+#### 🧠 Unified Single-Agent Reasoning
+- **Single ReAct Loop**: One `UnifiedAgent` drives planning, tool use, and answer generation.
+- **No Agent Handoff**: No supervisor/sub-agent string handoff or nested executor loops.
+- **Session Memory Continuity**: Full message history is maintained by `ChatMemory`.
 
-#### 💭 Intelligent Agent System
-- **FastThinkWorkflow**: A workflow for quick responses.
-- **ThinkDoReflectWorkflow**: A workflow for cyclic reflection.
-- **Multiple Specialized Agents**: Specialized agents for thinking, execution, reflection, etc.
+#### 💭 Unified Workflow
+- **UnifiedWorkflow**: One workflow entry for both HTTP chat and streaming.
+- **Unified Tool Mounting**: Browser, file, python, and reflection tools are mounted directly on the same agent.
 
 #### 🔧 Tool Ecosystem
 - **Code Execution**: Executes code and analyzes the results.
@@ -66,16 +65,8 @@ graph TD
     
     Controller --> Service[AgentService]
     
-    subgraph "Workflow"
-        Service -->|Complex Task| TDR[ThinkDoReflectWorkflow<br/>Deep Thinking]
-        Service -->|Simple Task| FT[FastThinkWorkflow<br/>Quick Response]
-    end
-    
-    TDR --> TA[ThinkingAgent<br/>Analyze & Plan]
-    TA --> EA[ExecutionAgent<br/>Execute Task]
-    EA --> RA[ReflectionAgent<br/>Evaluate Result]
-    RA -->|Task Complete| FinalResult[Final Result]
-    RA -->|Needs More Work| TA
+    Service --> Workflow[UnifiedWorkflow]
+    Workflow --> UA[UnifiedAgent<br/>Single ReAct Loop]
     
     subgraph "Tool Layer"
         CodeTool[Code Execution Tool]
@@ -83,11 +74,12 @@ graph TD
         SearchTool[Information Retrieval Tool]
     end
     
-    EA --> CodeTool
-    EA --> FileTool
-    EA --> SearchTool
-    
-    FT --> FinalResult
+    UA --> CodeTool
+    UA --> FileTool
+    UA --> SearchTool
+    UA --> ReflectionTool[Reflection Tool]
+
+    UA --> FinalResult[Final Result]
     FinalResult --> WebSocket --> UI
 ```
 
@@ -96,7 +88,7 @@ graph TD
 | **Component** | **Technology** | **Purpose** |
 |----------|-------------|---------|
 | **Backend Framework** | Spring Boot 3.2.0 | Core application framework |
-| **AI Integration** | LangChain4j 1.1.0 | LLM integration and multi-agent collaboration |
+| **AI Integration** | LangChain4j 1.1.0 | LLM integration and single-agent ReAct execution |
 | **Frontend** | Vue.js 3 + Element Plus | Modern, responsive user interface |
 | **Real-time Comms** | WebSocket + STOMP | Real-time messaging and log streaming |
 | **API** | RESTful API | Service interface |
@@ -141,15 +133,75 @@ graph TD
 
 For a one-command setup (Docker Compose), see: `docs/QUICK_START.md`.
 
+## 🧠 Long-Context Tuning (Recommended)
+
+To keep the ReAct loop running while controlling context growth, adjust `openmanus.chat-memory` in `application-local.yml`.
+
+- **Keep looping on tool calls**  
+  Set `react-max-iterations: 0` (unlimited).  
+  Optionally add `react-max-execution-seconds` and `react-repeated-tool-call-threshold` as safety guards.
+- **Control model input size**  
+  Use both message windows (`model-context-max-messages`, `model-context-max-total-messages`) and token budget (`model-context-max-approx-tokens`).
+- **Handle large tool outputs**  
+  Use lossless offload (`tool-result-offload-enabled`) + on-demand rehydrate (`tool-result-rehydrate-enabled`).
+
+Suggested presets:
+
+```yaml
+openmanus:
+  chat-memory:
+    # A) High-fidelity (best continuity, higher token cost)
+    model-context-max-messages: 0
+    model-context-max-total-messages: 0
+    model-context-max-approx-tokens: 0
+    react-max-iterations: 0
+    tool-result-offload-enabled: false
+    tool-result-rehydrate-enabled: false
+```
+
+```yaml
+openmanus:
+  chat-memory:
+    # B) Balanced (recommended default for long sessions)
+    model-context-max-messages: 24
+    model-context-max-total-messages: 48
+    model-context-max-approx-tokens: 12000
+    react-max-iterations: 0
+    react-max-execution-seconds: 600
+    react-repeated-tool-call-threshold: 8
+    tool-result-offload-enabled: true
+    tool-result-offload-min-chars: 12000
+    tool-result-rehydrate-enabled: true
+    tool-result-rehydrate-max-chars: 8000
+    tool-result-rehydrate-max-per-round: 2
+```
+
+```yaml
+openmanus:
+  chat-memory:
+    # C) Cost-saving (tight context budget)
+    model-context-max-messages: 12
+    model-context-max-total-messages: 20
+    model-context-max-approx-tokens: 6000
+    react-max-iterations: 0
+    react-max-execution-seconds: 300
+    react-repeated-tool-call-threshold: 6
+    tool-result-offload-enabled: true
+    tool-result-offload-min-chars: 8000
+    tool-result-rehydrate-enabled: true
+    tool-result-rehydrate-max-chars: 4000
+    tool-result-rehydrate-max-per-round: 1
+```
+
 ## 📊 Usage
 
 ### Unified API Endpoint
 
-All interactions are handled through a unified streaming API, `think-do-reflect-stream`, which automatically processes and returns real-time progress.
+All interactions are handled through a unified streaming API, `workflow-stream`, which automatically processes and returns real-time progress.
 
 ```bash
 # Example Request
-curl -X POST http://localhost:8089/api/agent/think-do-reflect-stream \
+curl -X POST http://localhost:8089/api/agent/workflow-stream \
   -H "Content-Type: application/json" \
   -d '{"input": "Analyze the development trend of the tourism industry during the Spring Festival."}'
 ```
