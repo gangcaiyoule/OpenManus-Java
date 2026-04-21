@@ -1,16 +1,14 @@
 package com.openmanus.agent.context;
 
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.data.message.ToolExecutionResultMessage;
-import dev.langchain4j.data.message.UserMessage;
+import com.openmanus.aiframework.runtime.model.AiChatMessage;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Token-budget-based model context selector.
@@ -21,26 +19,42 @@ public final class ModelContextBudgeter {
     private ModelContextBudgeter() {
     }
 
-    public static List<ChatMessage> applyApproxTokenBudget(List<ChatMessage> messages,
-                                                           UserMessage currentUserMessage,
-                                                           int maxApproxTokens) {
-        if (messages == null || messages.isEmpty() || maxApproxTokens <= 0) {
-            return messages;
+    public static List<AiChatMessage> applyApproxTokenBudget(List<AiChatMessage> messages,
+                                                              AiChatMessage currentUserMessage,
+                                                              int maxApproxTokens) {
+        return applyTokenBudget(
+                messages,
+                currentUserMessage,
+                maxApproxTokens,
+                ApproxModelContextTokenCounter.getInstance()
+        );
+    }
+
+    public static List<AiChatMessage> applyTokenBudget(List<AiChatMessage> messages,
+                                                       AiChatMessage currentUserMessage,
+                                                       int maxTokens,
+                                                       ModelContextTokenCounter tokenCounter) {
+        List<AiChatMessage> safeMessages = sanitize(messages);
+        if (safeMessages.isEmpty() || maxTokens <= 0) {
+            return safeMessages;
+        }
+        if (tokenCounter == null) {
+            tokenCounter = ApproxModelContextTokenCounter.getInstance();
         }
 
-        SystemMessage firstSystemMessage = messages.stream()
-                .filter(message -> message instanceof SystemMessage)
-                .map(message -> (SystemMessage) message)
+        AiChatMessage firstSystemMessage = safeMessages.stream()
+                .filter(message -> message.role() == AiChatMessage.Role.SYSTEM)
                 .findFirst()
                 .orElse(null);
-        int userIndex = findMessageIndexByIdentity(messages, currentUserMessage);
-        ChatMessage latestToolResult = findLatestToolResultMessage(messages, userIndex);
+        int userIndex = findMessageIndex(safeMessages, currentUserMessage);
+        AiChatMessage currentUserAnchor = userIndex >= 0 ? safeMessages.get(userIndex) : currentUserMessage;
+        AiChatMessage latestToolResult = findLatestToolResultMessage(safeMessages, userIndex);
 
-        List<ChatMessage> fixed = new ArrayList<>();
-        Set<ChatMessage> selected = Collections.newSetFromMap(new IdentityHashMap<>());
+        List<AiChatMessage> fixed = new ArrayList<>();
+        Set<AiChatMessage> selected = Collections.newSetFromMap(new IdentityHashMap<>());
 
-        if (currentUserMessage != null) {
-            selected.add(currentUserMessage);
+        if (currentUserAnchor != null) {
+            selected.add(currentUserAnchor);
         }
         if (firstSystemMessage != null) {
             selected.add(firstSystemMessage);
@@ -48,111 +62,78 @@ public final class ModelContextBudgeter {
         if (latestToolResult != null) {
             selected.add(latestToolResult);
         }
-        for (ChatMessage message : messages) {
+        for (AiChatMessage message : safeMessages) {
             if (selected.contains(message)) {
                 fixed.add(message);
             }
         }
 
-        int fixedTokens = estimateTokens(fixed);
-        if (fixedTokens > maxApproxTokens) {
-            List<ChatMessage> minimal = minimalCriticalSet(currentUserMessage, latestToolResult, firstSystemMessage, maxApproxTokens);
+        int fixedTokens = tokenCounter.estimateTokens(fixed);
+        if (fixedTokens > maxTokens) {
+            List<AiChatMessage> minimal = minimalCriticalSet(
+                    currentUserAnchor, latestToolResult, firstSystemMessage, maxTokens, tokenCounter);
             if (!minimal.isEmpty()) {
                 return minimal;
             }
-            return tail(messages, 1);
+            return tail(safeMessages, 1);
         }
 
         selected.clear();
-        for (ChatMessage message : fixed) {
+        for (AiChatMessage message : fixed) {
             selected.add(message);
         }
         int usedTokens = fixedTokens;
 
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage candidate = messages.get(i);
+        for (int i = safeMessages.size() - 1; i >= 0; i--) {
+            AiChatMessage candidate = safeMessages.get(i);
             if (selected.contains(candidate)) {
                 continue;
             }
-            int candidateTokens = estimateTokens(candidate);
-            if (usedTokens + candidateTokens > maxApproxTokens) {
+            int candidateTokens = tokenCounter.estimateTokens(candidate);
+            if (usedTokens + candidateTokens > maxTokens) {
                 continue;
             }
             selected.add(candidate);
             usedTokens += candidateTokens;
         }
 
-        List<ChatMessage> result = new ArrayList<>();
-        for (ChatMessage message : messages) {
+        List<AiChatMessage> result = new ArrayList<>();
+        for (AiChatMessage message : safeMessages) {
             if (selected.contains(message)) {
                 result.add(message);
             }
         }
-        return result.isEmpty() ? tail(messages, 1) : result;
+        return result.isEmpty() ? tail(safeMessages, 1) : result;
     }
 
-    private static int estimateTokens(List<ChatMessage> messages) {
-        int total = 0;
-        for (ChatMessage message : messages) {
-            total += estimateTokens(message);
+    private static int findMessageIndex(List<AiChatMessage> messages, AiChatMessage target) {
+        if (messages == null || messages.isEmpty() || target == null) {
+            return -1;
         }
-        return total;
-    }
-
-    private static int estimateTokens(ChatMessage message) {
-        if (message == null) {
-            return 0;
-        }
-        String text = extractText(message);
-        if (text == null || text.isEmpty()) {
-            return 8;
-        }
-        return 8 + (text.length() + 3) / 4;
-    }
-
-    private static String extractText(ChatMessage message) {
-        if (message instanceof SystemMessage systemMessage) {
-            return systemMessage.text();
-        }
-        if (message instanceof UserMessage userMessage) {
-            return userMessage.singleText();
-        }
-        if (message instanceof ToolExecutionResultMessage toolResultMessage) {
-            return toolResultMessage.text();
-        }
-        if (message instanceof AiMessage aiMessage) {
-            String text = aiMessage.text();
-            if (text != null && !text.isBlank()) {
-                return text;
-            }
-            if (aiMessage.hasToolExecutionRequests()) {
-                return aiMessage.toolExecutionRequests().toString();
-            }
-            return "";
-        }
-        return message.toString();
-    }
-
-    private static int findMessageIndexByIdentity(List<ChatMessage> messages, ChatMessage target) {
         for (int i = 0; i < messages.size(); i++) {
             if (messages.get(i) == target) {
+                return i;
+            }
+        }
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (target.equals(messages.get(i))) {
                 return i;
             }
         }
         return -1;
     }
 
-    private static ChatMessage findLatestToolResultMessage(List<ChatMessage> messages, int currentUserIndex) {
+    private static AiChatMessage findLatestToolResultMessage(List<AiChatMessage> messages, int currentUserIndex) {
         for (int i = messages.size() - 1; i > currentUserIndex; i--) {
-            ChatMessage message = messages.get(i);
-            if (message instanceof ToolExecutionResultMessage) {
+            AiChatMessage message = messages.get(i);
+            if (message != null && message.role() == AiChatMessage.Role.TOOL) {
                 return message;
             }
         }
         return null;
     }
 
-    private static List<ChatMessage> tail(List<ChatMessage> source, int size) {
+    private static List<AiChatMessage> tail(List<AiChatMessage> source, int size) {
         if (size <= 0 || source.isEmpty()) {
             return List.of();
         }
@@ -160,11 +141,12 @@ public final class ModelContextBudgeter {
         return new ArrayList<>(source.subList(from, source.size()));
     }
 
-    private static List<ChatMessage> minimalCriticalSet(UserMessage currentUserMessage,
-                                                        ChatMessage latestToolResult,
-                                                        SystemMessage firstSystemMessage,
-                                                        int maxApproxTokens) {
-        List<ChatMessage> prioritized = new ArrayList<>(3);
+    private static List<AiChatMessage> minimalCriticalSet(AiChatMessage currentUserMessage,
+                                                           AiChatMessage latestToolResult,
+                                                           AiChatMessage firstSystemMessage,
+                                                           int maxTokens,
+                                                           ModelContextTokenCounter tokenCounter) {
+        List<AiChatMessage> prioritized = new ArrayList<>(3);
         if (currentUserMessage != null) {
             prioritized.add(currentUserMessage);
         }
@@ -175,22 +157,31 @@ public final class ModelContextBudgeter {
             prioritized.add(firstSystemMessage);
         }
 
-        List<ChatMessage> result = new ArrayList<>(3);
+        List<AiChatMessage> result = new ArrayList<>(3);
         int used = 0;
-        for (ChatMessage message : prioritized) {
-            int tokens = estimateTokens(message);
-            if (!result.isEmpty() && used + tokens > maxApproxTokens) {
+        for (AiChatMessage message : prioritized) {
+            int tokens = tokenCounter.estimateTokens(message);
+            if (!result.isEmpty() && used + tokens > maxTokens) {
                 continue;
             }
-            if (result.isEmpty() && used + tokens > maxApproxTokens) {
+            if (result.isEmpty() && used + tokens > maxTokens) {
                 result.add(message);
                 return result;
             }
-            if (used + tokens <= maxApproxTokens) {
+            if (used + tokens <= maxTokens) {
                 result.add(message);
                 used += tokens;
             }
         }
         return result;
+    }
+
+    private static List<AiChatMessage> sanitize(List<AiChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        return messages.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 }
