@@ -11,7 +11,7 @@ import java.util.Map;
 
 /**
  * 详细执行流程模型
- * 用于可视化展示Agent执行的完整流程，包括思考、执行、反思等各个阶段
+ * 用于可视化展示 Agent 执行的完整过程，包括思考、执行、反思等各个阶段
  */
 @Data
 @Builder
@@ -30,12 +30,12 @@ public class DetailedExecutionFlow {
     private String userInput;
     
     /**
-     * 工作流开始时间
+     * 执行开始时间
      */
     private LocalDateTime startTime;
     
     /**
-     * 工作流结束时间
+     * 执行结束时间
      */
     private LocalDateTime endTime;
     
@@ -45,9 +45,9 @@ public class DetailedExecutionFlow {
     private Long totalDuration;
     
     /**
-     * 工作流状态
+     * 执行流程状态
      */
-    private WorkflowStatus status;
+    private FlowStatus status;
     
     /**
      * 最终结果
@@ -65,9 +65,9 @@ public class DetailedExecutionFlow {
     private String error;
     
     /**
-     * 工作流状态枚举
+     * 执行流程状态枚举
      */
-    public enum WorkflowStatus {
+    public enum FlowStatus {
         RUNNING,        // 运行中
         COMPLETED,      // 已完成
         FAILED,         // 失败

@@ -47,21 +47,21 @@ public class AgentMonitoringController {
             List<DetailedExecutionFlow> validFlows = sanitizeFlows(detailedFlows);
             dashboard.put("totalDetailedFlows", validFlows.size());
             
-            // 运行中的工作流
+            // 运行中的执行流程
             long runningFlows = validFlows.stream()
-                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.WorkflowStatus.RUNNING)
+                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.FlowStatus.RUNNING)
                     .count();
             dashboard.put("runningFlows", runningFlows);
             
-            // 已完成的工作流
+            // 已完成的执行流程
             long completedFlows = validFlows.stream()
-                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.WorkflowStatus.COMPLETED)
+                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.FlowStatus.COMPLETED)
                     .count();
             dashboard.put("completedFlows", completedFlows);
             
-            // 失败的工作流
+            // 失败的执行流程
             long failedFlows = validFlows.stream()
-                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.WorkflowStatus.FAILED)
+                    .filter(flow -> flow.getStatus() == DetailedExecutionFlow.FlowStatus.FAILED)
                     .count();
             dashboard.put("failedFlows", failedFlows);
             

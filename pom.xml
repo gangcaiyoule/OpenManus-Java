@@ -24,7 +24,8 @@
         <jackson.version>2.17.2</jackson.version>
         <lombok.version>1.18.30</lombok.version>
         <openmanus.liveSmoke.enabled>false</openmanus.liveSmoke.enabled>
-        <surefire.excludedGroups>live-smoke</surefire.excludedGroups>
+        <surefire.excludedGroups>e2e,live-smoke</surefire.excludedGroups>
+        <skip.frontend.build>false</skip.frontend.build>
     </properties>
 
     <dependencyManagement>
@@ -217,6 +218,54 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>build-react-frontend</id>
+                        <phase>generate-resources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <skip>${skip.frontend.build}</skip>
+                            <workingDirectory>${project.basedir}/frontend</workingDirectory>
+                            <executable>npm</executable>
+                            <arguments>
+                                <argument>run</argument>
+                                <argument>build</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-react-dist</id>
+                        <phase>process-resources</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/frontend/dist</directory>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
             
             <!-- Surefire Plugin with Java 24 support -->

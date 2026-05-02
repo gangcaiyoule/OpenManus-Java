@@ -7,6 +7,9 @@ openmanus:
     version: "1.0.0"
     workspace-root: "./workspace"
     log-level: "INFO"
+    # 未显式传 X-Session-ID 时，按 X-User-ID/default-user-id 复用同一个 Docker 沙箱
+    # 也可通过 OPENMANUS_APP_DEFAULT_USER_ID 或 USER_ID 覆盖
+    default-user-id: "001"
 
   # LLM 默认通过根目录 .env 注入，推荐使用以下变量：
   # OPENMANUS_LLM_DEFAULT_LLM_API_TYPE=openai
@@ -22,7 +25,6 @@ openmanus:
 
   sandbox:
     type: "docker"
-    use-sandbox: false
     image: "python:3.11-slim"
     work-dir: "/workspace"
     memory-limit: "512m"
@@ -44,7 +46,7 @@ openmanus:
   web-proxy:
     # 是否暴露 /api/proxy/web 与 /api/proxy/url
     # 也可通过环境变量 OPENMANUS_WEB_PROXY_ENABLED 覆盖
-    enabled: false
+    enabled: true
     # 允许跨域调用 Web 代理接口的 origin 白名单；为空时不开放跨域访问
     # 也可通过环境变量 OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS 覆盖，使用逗号分隔
     allowed-origins: []

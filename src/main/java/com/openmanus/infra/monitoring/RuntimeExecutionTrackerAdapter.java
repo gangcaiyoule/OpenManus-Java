@@ -68,34 +68,22 @@ public class RuntimeExecutionTrackerAdapter implements AiExecutionTracker {
         }
     }
 
-    private static AgentExecutionEvent.ExecutionStatus toDomainStatus(AiExecutionStatus status) {
+    private static String toDomainStatus(AiExecutionStatus status) {
         if (status == null) {
-            return AgentExecutionEvent.ExecutionStatus.ERROR;
+            return "ERROR";
         }
-        return switch (status) {
-            case PENDING -> AgentExecutionEvent.ExecutionStatus.PENDING;
-            case RUNNING -> AgentExecutionEvent.ExecutionStatus.RUNNING;
-            case SUCCESS -> AgentExecutionEvent.ExecutionStatus.SUCCESS;
-            case FAILED -> AgentExecutionEvent.ExecutionStatus.FAILED;
-            case CANCELLED -> AgentExecutionEvent.ExecutionStatus.CANCELLED;
-            case ERROR -> AgentExecutionEvent.ExecutionStatus.ERROR;
-            case TIMEOUT -> AgentExecutionEvent.ExecutionStatus.TIMEOUT;
-        };
+        return status.name();
     }
 
-    private static AiExecutionStatus toRuntimeStatus(AgentExecutionEvent.ExecutionStatus status) {
+    private static AiExecutionStatus toRuntimeStatus(String status) {
         if (status == null) {
             return AiExecutionStatus.ERROR;
         }
-        return switch (status) {
-            case PENDING -> AiExecutionStatus.PENDING;
-            case RUNNING -> AiExecutionStatus.RUNNING;
-            case SUCCESS -> AiExecutionStatus.SUCCESS;
-            case FAILED -> AiExecutionStatus.FAILED;
-            case CANCELLED -> AiExecutionStatus.CANCELLED;
-            case ERROR -> AiExecutionStatus.ERROR;
-            case TIMEOUT -> AiExecutionStatus.TIMEOUT;
-        };
+        try {
+            return AiExecutionStatus.valueOf(status);
+        } catch (IllegalArgumentException e) {
+            return AiExecutionStatus.ERROR;
+        }
     }
 
     private static AiExecutionEvent toRuntimeEvent(AgentExecutionEvent event) {

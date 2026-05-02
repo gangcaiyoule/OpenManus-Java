@@ -1,13 +1,12 @@
 package com.openmanus.agent.base;
 
-import com.openmanus.agent.context.ContextAssembler;
-import com.openmanus.agent.context.ContextBudgetPolicy;
-import com.openmanus.agent.context.ContextSnapshot;
-import com.openmanus.agent.context.IndexedRehydrateSelector;
-import com.openmanus.agent.context.ModelContextTokenCounterFactory;
-import com.openmanus.agent.context.TaskStateBudgetPolicy;
-import com.openmanus.agent.context.TaskExecutionState;
-import com.openmanus.agent.context.TaskExecutionStateTracker;
+import com.openmanus.agent.context.assembly.ContextAssembler;
+import com.openmanus.agent.context.assembly.ContextBudgetPolicy;
+import com.openmanus.agent.context.assembly.ContextSnapshot;
+import com.openmanus.agent.context.assembly.TaskExecutionState;
+import com.openmanus.agent.context.assembly.TaskExecutionStateTracker;
+import com.openmanus.agent.context.compression.IndexedRehydrateSelector;
+import com.openmanus.agent.context.token.ModelContextTokenCounter;
 import com.openmanus.aiframework.runtime.AiChatModel;
 import com.openmanus.aiframework.runtime.AiMemory;
 import com.openmanus.aiframework.runtime.AiMemoryProvider;
@@ -22,6 +21,7 @@ import com.openmanus.aiframework.runtime.model.AiToolSpec;
 import com.openmanus.aiframework.tool.AiRegisteredTool;
 import com.openmanus.aiframework.tool.AiToolExecutionRequest;
 import com.openmanus.aiframework.tool.AiToolRegistry;
+import com.openmanus.domain.service.ExecutionEventPort;
 import lombok.extern.slf4j.Slf4j;
 
 import java.nio.charset.StandardCharsets;
@@ -61,16 +61,16 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         int modelContextMaxMessages = 0;
         int modelContextMaxTotalMessages = 0;
         int modelContextMaxApproxTokens = 0;
-        String modelContextTokenCountMode = ModelContextTokenCounterFactory.MODE_APPROX;
+        String modelContextTokenCountMode = ModelContextTokenCounter.MODE_APPROX;
         String modelContextTokenizerModel = "";
         int maxIterations = 0;
         int maxExecutionSeconds = 0;
         int repeatedToolCallThreshold = 0;
-        int taskStatePlanMaxChars = TaskStateBudgetPolicy.DEFAULT_PLAN_MAX_CHARS;
-        int taskStateInProgressMaxChars = TaskStateBudgetPolicy.DEFAULT_IN_PROGRESS_MAX_CHARS;
-        int taskStateLastFailureMaxChars = TaskStateBudgetPolicy.DEFAULT_LAST_FAILURE_MAX_CHARS;
-        int taskStateTodoMaxItems = TaskStateBudgetPolicy.DEFAULT_TODO_MAX_ITEMS;
-        int taskStateTodoItemMaxChars = TaskStateBudgetPolicy.DEFAULT_TODO_ITEM_MAX_CHARS;
+        int taskStatePlanMaxChars = TaskExecutionState.Budget.DEFAULT_PLAN_MAX_CHARS;
+        int taskStateInProgressMaxChars = TaskExecutionState.Budget.DEFAULT_IN_PROGRESS_MAX_CHARS;
+        int taskStateLastFailureMaxChars = TaskExecutionState.Budget.DEFAULT_LAST_FAILURE_MAX_CHARS;
+        int taskStateTodoMaxItems = TaskExecutionState.Budget.DEFAULT_TODO_MAX_ITEMS;
+        int taskStateTodoItemMaxChars = TaskExecutionState.Budget.DEFAULT_TODO_ITEM_MAX_CHARS;
         boolean enableToolResultOffload = false;
         int toolResultOffloadMinChars = 12000;
         int toolResultOffloadHeadChars = 240;
@@ -79,7 +79,16 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         int toolResultRehydrateMaxChars = 8000;
         int toolResultRehydrateMaxPerRound = 0;
         AiToolResultArtifactStore toolResultArtifactStore;
+        ExecutionEventPort executionEventPort;
         final Map<String, AiRegisteredTool> tools = new HashMap<>();
+
+        /**
+         * Sets the execution event port for publishing progress events to WebSocket.
+         */
+        public B executionEventPort(ExecutionEventPort executionEventPort) {
+            this.executionEventPort = executionEventPort;
+            return result();
+        }
 
         /**
          * Sets runtime-first chat model used by the agent loop.
@@ -163,7 +172,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
          * Supported values: approx | tokenizer.
          */
         public B modelContextTokenCountMode(String mode) {
-            this.modelContextTokenCountMode = ModelContextTokenCounterFactory.normalizeMode(mode);
+            this.modelContextTokenCountMode = ModelContextTokenCounter.normalizeMode(mode);
             return result();
         }
 
@@ -204,35 +213,35 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
 
         public B taskStatePlanMaxChars(int maxChars) {
             this.taskStatePlanMaxChars = maxChars <= 0
-                    ? TaskStateBudgetPolicy.DEFAULT_PLAN_MAX_CHARS
+                    ? TaskExecutionState.Budget.DEFAULT_PLAN_MAX_CHARS
                     : maxChars;
             return result();
         }
 
         public B taskStateInProgressMaxChars(int maxChars) {
             this.taskStateInProgressMaxChars = maxChars <= 0
-                    ? TaskStateBudgetPolicy.DEFAULT_IN_PROGRESS_MAX_CHARS
+                    ? TaskExecutionState.Budget.DEFAULT_IN_PROGRESS_MAX_CHARS
                     : maxChars;
             return result();
         }
 
         public B taskStateLastFailureMaxChars(int maxChars) {
             this.taskStateLastFailureMaxChars = maxChars <= 0
-                    ? TaskStateBudgetPolicy.DEFAULT_LAST_FAILURE_MAX_CHARS
+                    ? TaskExecutionState.Budget.DEFAULT_LAST_FAILURE_MAX_CHARS
                     : maxChars;
             return result();
         }
 
         public B taskStateTodoMaxItems(int maxItems) {
             this.taskStateTodoMaxItems = maxItems <= 0
-                    ? TaskStateBudgetPolicy.DEFAULT_TODO_MAX_ITEMS
+                    ? TaskExecutionState.Budget.DEFAULT_TODO_MAX_ITEMS
                     : maxItems;
             return result();
         }
 
         public B taskStateTodoItemMaxChars(int maxChars) {
             this.taskStateTodoItemMaxChars = maxChars <= 0
-                    ? TaskStateBudgetPolicy.DEFAULT_TODO_ITEM_MAX_CHARS
+                    ? TaskExecutionState.Budget.DEFAULT_TODO_ITEM_MAX_CHARS
                     : maxChars;
             return result();
         }
@@ -367,7 +376,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
     private final int maxIterations;
     private final int maxExecutionSeconds;
     private final int repeatedToolCallThreshold;
-    private final TaskStateBudgetPolicy taskStateBudgetPolicy;
+    private final TaskExecutionState.Budget taskStateBudget;
     private final boolean enableToolResultOffload;
     private final int toolResultOffloadMinChars;
     private final int toolResultOffloadHeadChars;
@@ -376,6 +385,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
     private final int toolResultRehydrateMaxChars;
     private final int toolResultRehydrateMaxPerRound;
     private final AiToolResultArtifactStore toolResultArtifactStore;
+    private final ExecutionEventPort executionEventPort;
     private final ContextBudgetPolicy contextBudgetPolicy;
     private final ContextAssembler contextAssembler;
     private final Map<String, AiRegisteredTool> tools;
@@ -399,7 +409,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         this.modelContextMaxMessages = builder.modelContextMaxMessages;
         this.modelContextMaxTotalMessages = builder.modelContextMaxTotalMessages;
         this.modelContextMaxApproxTokens = builder.modelContextMaxApproxTokens;
-        this.modelContextTokenCountMode = ModelContextTokenCounterFactory.normalizeMode(
+        this.modelContextTokenCountMode = ModelContextTokenCounter.normalizeMode(
                 builder.modelContextTokenCountMode);
         this.modelContextTokenizerModel = builder.modelContextTokenizerModel == null
                 ? ""
@@ -407,7 +417,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         this.maxIterations = builder.maxIterations;
         this.maxExecutionSeconds = builder.maxExecutionSeconds;
         this.repeatedToolCallThreshold = builder.repeatedToolCallThreshold;
-        this.taskStateBudgetPolicy = new TaskStateBudgetPolicy(
+        this.taskStateBudget = new TaskExecutionState.Budget(
                 builder.taskStatePlanMaxChars,
                 builder.taskStateInProgressMaxChars,
                 builder.taskStateLastFailureMaxChars,
@@ -422,16 +432,17 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         this.toolResultRehydrateMaxChars = builder.toolResultRehydrateMaxChars;
         this.toolResultRehydrateMaxPerRound = builder.toolResultRehydrateMaxPerRound;
         this.toolResultArtifactStore = builder.toolResultArtifactStore;
+        this.executionEventPort = builder.executionEventPort;
         this.contextBudgetPolicy = new ContextBudgetPolicy(
                 this.modelContextMaxMessages,
                 this.modelContextMaxTotalMessages,
                 this.modelContextMaxApproxTokens,
-                ModelContextTokenCounterFactory.create(
+                ModelContextTokenCounter.create(
                         this.modelContextTokenCountMode,
                         this.modelContextTokenizerModel
                 )
         );
-        this.contextAssembler = new ContextAssembler(this.contextBudgetPolicy, this.taskStateBudgetPolicy);
+        this.contextAssembler = new ContextAssembler(this.contextBudgetPolicy, this.taskStateBudget);
         validateToolResultStoreConfiguration();
         this.tools = Collections.unmodifiableMap(new HashMap<>(builder.tools));
         this.toolSpecifications = AiToolRegistry.toRuntimeToolSpecifications(this.tools.values());
@@ -492,7 +503,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         messageList.appendAndPersist(userMessage, memory);
 
         long startNs = System.nanoTime();
-        TaskExecutionState taskExecutionState = TaskExecutionState.empty(taskStateBudgetPolicy);
+        TaskExecutionState taskExecutionState = TaskExecutionState.empty(taskStateBudget);
         String lastToolBatchFingerprint = null;
         int repeatedToolBatchCount = 0;
         String lastUnknownToolFingerprint = null;
@@ -508,6 +519,8 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 }
             }
             log.info("Agent Iteration #{}", i + 1);
+
+            publishIterationEvent(memoryId, i + 1, taskExecutionState);
 
             List<AiChatMessage> modelMessagesBeforeBudget = buildModelMessages(
                     messageList.messages(),
@@ -544,7 +557,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             taskExecutionState = TaskExecutionStateTracker.updateFromAssistantPlan(
                     taskExecutionState,
                     assistantMessage,
-                    taskStateBudgetPolicy
+                    taskStateBudget
             );
 
             if (assistantMessage.toolCalls() == null || assistantMessage.toolCalls().isEmpty()) {
@@ -600,7 +613,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 taskExecutionState = TaskExecutionStateTracker.markToolStarted(
                         taskExecutionState,
                         request.name(),
-                        taskStateBudgetPolicy
+                        taskStateBudget
                 );
                 log.debug("Executing tool: {}", request.name());
                 log.info(TO_FRONTEND, "│  🔧 执行工具: {}", request.name());
@@ -613,7 +626,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                             taskExecutionState,
                             request.name(),
                             outcome,
-                            taskStateBudgetPolicy
+                            taskStateBudget
                     );
                 } else {
                     try {
@@ -621,14 +634,14 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                         taskExecutionState = TaskExecutionStateTracker.markToolSucceeded(
                                 taskExecutionState,
                                 request.name(),
-                                taskStateBudgetPolicy
+                                taskStateBudget
                         );
                     } catch (RuntimeException ex) {
                         taskExecutionState = TaskExecutionStateTracker.markToolFailed(
                                 taskExecutionState,
                                 request.name(),
                                 ex.getMessage(),
-                                taskStateBudgetPolicy
+                                taskStateBudget
                         );
                         throw ex;
                     }
@@ -691,7 +704,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
 
     /**
      * Extracts the user's core message from runtime user input.
-     * Unified mode defaults to plain-text arguments.
+     * The default execution mode uses plain-text arguments.
      * For backward compatibility, only strict legacy shape {"context":"..."} is unpacked.
      */
     private AiChatMessage extractUserMessageFromInput(String userInput) {
@@ -709,7 +722,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 arguments = jsonArgs.get("context").getAsString();
             }
         } catch (Exception e) {
-            // Plain-text arguments are the default in unified workflow.
+            // Plain-text arguments are the default in the current execution pipeline.
         }
         if (arguments.isBlank()) {
             throw new IllegalArgumentException("userInput cannot be null or blank");
@@ -1232,5 +1245,30 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             }
         }
         return count;
+    }
+
+    private void publishIterationEvent(Object memoryId, int iteration, TaskExecutionState taskState) {
+        if (executionEventPort == null || memoryId == null) {
+            return;
+        }
+        String sessionId = memoryId.toString();
+        String taskPlan = taskState != null ? taskState.plan() : "";
+        String currentTool = taskState != null ? taskState.inProgress() : "";
+
+        var event = new com.openmanus.domain.model.AgentExecutionEvent();
+        event.setSessionId(sessionId);
+        event.setEventId(java.util.UUID.randomUUID().toString());
+        event.setAgentName("execution_coordinator");
+        event.setAgentType("AGENT_ITERATION");
+        event.setEventType(com.openmanus.domain.model.AgentExecutionEvent.EventType.AGENT_START);
+        event.setStatus("RUNNING");
+        event.setMetadata(java.util.Map.of(
+            "iteration", iteration,
+            "taskPlan", taskPlan != null ? taskPlan : "",
+            "currentTool", currentTool != null ? currentTool : ""
+        ));
+
+        executionEventPort.recordCustomEvent(event);
+        log.debug("Published iteration event: sessionId={}, iteration={}", sessionId, iteration);
     }
 }

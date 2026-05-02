@@ -1,7 +1,7 @@
 package com.openmanus.aiframework.runtime;
 
 /**
- * Runtime abstraction for workflow execution tracking and event subscription.
+ * Runtime abstraction for agent execution tracking and event subscription.
  */
 public interface AiExecutionTracker {
 

@@ -1,6 +1,7 @@
 package com.openmanus.domain.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -11,8 +12,8 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 /**
- * Agent执行事件模型
- * 用于跟踪和展示Agent的执行状态
+ * Agent 执行事件模型
+ * 用于跟踪和展示 Agent 的执行状态
  */
 @Data
 @Builder
@@ -20,39 +21,44 @@ import java.util.Map;
 @AllArgsConstructor
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class AgentExecutionEvent {
-    
+
     // 使用静态ObjectMapper避免每次序列化都创建新的实例
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    
+
     /**
      * 执行会话ID
      */
+    @JsonProperty("session_id")
     private String sessionId;
-    
+
     /**
      * 事件ID
      */
+    @JsonProperty("event_id")
     private String eventId;
-    
+
     /**
      * Agent名称
      */
+    @JsonProperty("agent_name")
     private String agentName;
-    
+
     /**
      * Agent类型
      */
+    @JsonProperty("agent_type")
     private String agentType;
-    
+
     /**
      * 事件类型
      */
+    @JsonProperty("event_type")
     private EventType eventType;
-    
+
     /**
      * 执行状态
      */
-    private ExecutionStatus status;
+    private String status;
     
     /**
      * 输入数据
@@ -74,11 +80,13 @@ public class AgentExecutionEvent {
     /**
      * 执行开始时间
      */
+    @JsonProperty("start_time")
     private LocalDateTime startTime;
-    
+
     /**
      * 执行结束时间
      */
+    @JsonProperty("end_time")
     private LocalDateTime endTime;
     
     /**
@@ -171,9 +179,16 @@ public class AgentExecutionEvent {
         STEP_START,         // 执行步骤开始
         STEP_END,           // 执行步骤结束
         DECISION_POINT,     // 决策点
-        WORKFLOW_START,     // 工作流开始
-        WORKFLOW_END,       // 工作流结束
-        INTERMEDIATE_RESULT // 中间结果
+        EXECUTION_START_MARKER, // 执行链路开始
+        EXECUTION_END_MARKER,   // 执行链路结束
+        INTERMEDIATE_RESULT, // 中间结果
+        SEARCH_STARTED,     // 搜索开始
+        SEARCH_RESULTS_READY, // 搜索结果已就绪
+        BROWSER_URL_OPENED, // 浏览器已打开 URL
+        WEB_FETCH_STARTED,  // 网页抓取开始
+        WEB_FETCH_SNAPSHOT_READY, // 网页快照已生成
+        WEB_PREVIEW_BLOCKED, // 网页预览受限
+        VNC_READY           // VNC 已就绪
     }
     
     /**
@@ -208,7 +223,7 @@ public class AgentExecutionEvent {
                 .agentName(agentName)
                 .agentType(agentType)
                 .eventType(EventType.AGENT_START)
-                .status(ExecutionStatus.RUNNING)
+                .status(ExecutionStatus.RUNNING.name())
                 .startTime(LocalDateTime.now())
                 .build();
                 
@@ -221,7 +236,7 @@ public class AgentExecutionEvent {
     /**
      * 创建Agent结束事件
      */
-    public static AgentExecutionEvent createEndEvent(String sessionId, String agentName, String agentType, Object output, ExecutionStatus status) {
+    public static AgentExecutionEvent createEndEvent(String sessionId, String agentName, String agentType, Object output, String status) {
         AgentExecutionEvent event = AgentExecutionEvent.builder()
                 .sessionId(sessionId)
                 .eventId(java.util.UUID.randomUUID().toString())
@@ -248,7 +263,7 @@ public class AgentExecutionEvent {
                 .agentName(agentName)
                 .agentType(agentType)
                 .eventType(EventType.ERROR)
-                .status(ExecutionStatus.FAILED)
+                .status(ExecutionStatus.FAILED.name())
                 .error(error)
                 .endTime(LocalDateTime.now())
                 .build();

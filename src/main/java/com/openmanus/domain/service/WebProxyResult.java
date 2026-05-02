@@ -13,4 +13,8 @@ public record WebProxyResult(
     public boolean isRedirect() {
         return redirectLocation != null && !redirectLocation.isBlank();
     }
+
+    public boolean isHtml() {
+        return contentType != null && contentType.toLowerCase().contains("text/html");
+    }
 }

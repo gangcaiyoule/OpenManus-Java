@@ -1,6 +1,5 @@
 package com.openmanus.aiframework.runtime;
 
-import java.nio.file.Path;
 import java.util.Optional;
 
 /**
@@ -12,5 +11,15 @@ public interface AiSessionSandboxGateway {
 
     AiSessionSandboxInfo getOrCreateSandbox(String sessionId);
 
-    Path getOrCreateFileSandboxRoot(String sessionId);
+    String getWorkspaceRoot(String sessionId);
+
+    String resolveWorkspacePath(String sessionId, String userPath);
+
+    AiSandboxCommandResult executeCommand(String sessionId, String command, String cwd, int timeoutSeconds);
+
+    AiSandboxCommandResult openBrowserUrl(String sessionId, String url);
+
+    String readTextFile(String sessionId, String path);
+
+    void writeTextFile(String sessionId, String path, String content);
 }

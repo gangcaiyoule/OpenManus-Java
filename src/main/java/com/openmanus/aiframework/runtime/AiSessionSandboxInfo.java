@@ -6,12 +6,15 @@ package com.openmanus.aiframework.runtime;
 public record AiSessionSandboxInfo(
         String sessionId,
         String containerId,
+        String workspaceRoot,
         String vncUrl,
         Integer mappedPort,
         String status
 ) {
 
     public boolean isAvailable() {
-        return "RUNNING".equals(status) && vncUrl != null && !vncUrl.isEmpty();
+        return "RUNNING".equals(status)
+                && ((workspaceRoot != null && !workspaceRoot.isEmpty())
+                || (vncUrl != null && !vncUrl.isEmpty()));
     }
 }

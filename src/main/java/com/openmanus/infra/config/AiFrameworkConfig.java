@@ -16,6 +16,7 @@ import com.openmanus.aiframework.parser.GeminiResponseParser;
 import com.openmanus.aiframework.parser.OpenAiResponseParser;
 import com.openmanus.aiframework.transport.HttpTransport;
 import com.openmanus.aiframework.transport.SseTransport;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -25,6 +26,7 @@ import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
 
+@Slf4j
 @Configuration
 public class AiFrameworkConfig {
 
@@ -113,6 +115,7 @@ public class AiFrameworkConfig {
                                                  AiProviderType providerType,
                                                  String defaultBaseUrl,
                                                  String fallbackModel) {
+        log.info("resolveProviderConfig: providerType={}, defaultBaseUrl={}, fallbackModel={}", providerType, defaultBaseUrl, fallbackModel);
         OpenManusProperties.LlmConfig llm = properties.getLlm();
         if (llm == null) {
             llm = new OpenManusProperties.LlmConfig();
@@ -121,6 +124,10 @@ public class AiFrameworkConfig {
         if (defaultLlm == null) {
             defaultLlm = new OpenManusProperties.LlmConfig.DefaultLLM();
         }
+        log.info("resolveProviderConfig: defaultLlm.apiType={}, baseUrl={}, apiKey={}, model={}",
+                defaultLlm.getApiType(), defaultLlm.getBaseUrl(),
+                defaultLlm.getApiKey() == null ? "null" : "***",
+                defaultLlm.getModel());
         OpenManusProperties.LlmConfig.ProviderProfile profile = findProfile(llm.getProviders(), providerType);
 
         String baseUrl = nonBlank(profile == null ? null : profile.getBaseUrl(),

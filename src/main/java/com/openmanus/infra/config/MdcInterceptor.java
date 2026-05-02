@@ -16,13 +16,24 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class MdcInterceptor implements HandlerInterceptor {
 
   private static final String SESSION_ID_HEADER = "X-Session-ID";
+  private static final String USER_ID_HEADER = "X-User-ID";
   private static final String SESSION_ID_MDC_KEY = "sessionId";
+  private static final String DEFAULT_USER_ID = "001";
+
+  private final OpenManusProperties properties;
+
+  public MdcInterceptor(OpenManusProperties properties) {
+    this.properties = properties;
+  }
 
   @Override
   public boolean preHandle(
       HttpServletRequest request, HttpServletResponse response, Object handler) {
     String sessionId =
-        normalizeSessionId(request.getHeader(SESSION_ID_HEADER));
+        normalizeSessionId(
+            request.getHeader(SESSION_ID_HEADER),
+            request.getHeader(USER_ID_HEADER),
+            defaultUserId());
     MDC.put(SESSION_ID_MDC_KEY, sessionId);
     return true;
   }
@@ -33,7 +44,23 @@ public class MdcInterceptor implements HandlerInterceptor {
     MDC.remove(SESSION_ID_MDC_KEY);
   }
 
-  static String normalizeSessionId(String rawSessionId) {
-    return SessionIdPolicy.normalizeOrGenerate(rawSessionId);
+  static String normalizeSessionId(String rawSessionId, String rawUserId, String defaultUserId) {
+    String sessionId = SessionIdPolicy.normalizeOrNull(rawSessionId);
+    if (sessionId != null) {
+      return sessionId;
+    }
+    String userId = SessionIdPolicy.normalizeOrNull(rawUserId);
+    if (userId != null) {
+      return userId;
+    }
+    String configuredDefault = SessionIdPolicy.normalizeOrNull(defaultUserId);
+    return configuredDefault == null ? DEFAULT_USER_ID : configuredDefault;
+  }
+
+  private String defaultUserId() {
+    if (properties == null || properties.getApp() == null) {
+      return DEFAULT_USER_ID;
+    }
+    return properties.getApp().getDefaultUserId();
   }
 }

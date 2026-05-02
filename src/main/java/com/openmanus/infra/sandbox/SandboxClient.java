@@ -8,252 +8,213 @@ import com.github.dockerjava.core.command.ExecStartResultCallback;
 import com.openmanus.infra.config.OpenManusProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Docker 代码执行沙箱客户端
- * 
- * 功能：
- * 1. 提供安全的 Python/Bash 代码执行环境
- * 2. 资源隔离和限制
- * 3. 支持本地执行模式（禁用沙箱时）
- * 
- * 设计：单例容器，应用启动时初始化并持续运行
+ * Strongly-enforced Docker session sandbox client.
  */
-@Component
 public class SandboxClient implements Closeable {
     private static final Logger log = LoggerFactory.getLogger(SandboxClient.class);
-    
+
     private final DockerClientManager dockerManager;
     private final OpenManusProperties.SandboxSettings config;
-    private String containerId;
-    private boolean isRunning = false;
-    
-    @Autowired
+    private final Map<String, SessionContainer> sessionContainers = new ConcurrentHashMap<>();
+
     public SandboxClient(OpenManusProperties properties) {
+        this(properties, new DockerClientManager());
+    }
+
+    SandboxClient(OpenManusProperties properties, DockerClientManager dockerManager) {
+        if (properties == null || properties.getSandbox() == null) {
+            throw new IllegalArgumentException("sandbox properties cannot be null");
+        }
         this.config = properties.getSandbox();
-        
-        if (!config.isUseSandbox()) {
-            this.dockerManager = null;
-            log.info("沙箱已禁用，将使用本地执行模式");
+        this.dockerManager = Objects.requireNonNull(dockerManager, "dockerManager");
+        this.dockerManager.pullImageIfNeeded(config.getImage());
+    }
+
+    public SessionContainer ensureSessionContainer(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            throw new IllegalArgumentException("sessionId cannot be blank");
+        }
+        SessionContainer existing = sessionContainers.get(sessionId);
+        if (existing != null && dockerManager.isContainerRunning(existing.containerId())) {
+            return existing;
+        }
+        synchronized (sessionContainers) {
+            SessionContainer current = sessionContainers.get(sessionId);
+            if (current != null && dockerManager.isContainerRunning(current.containerId())) {
+                return current;
+            }
+            SessionContainer created = createSessionContainer(sessionId);
+            sessionContainers.put(sessionId, created);
+            return created;
+        }
+    }
+
+    public boolean isSessionRunning(String sessionId) {
+        SessionContainer container = sessionContainers.get(sessionId);
+        return container != null && dockerManager.isContainerRunning(container.containerId());
+    }
+
+    public String getWorkspaceRoot() {
+        return config.getWorkDir();
+    }
+
+    public String getContainerId(String sessionId) {
+        SessionContainer container = sessionContainers.get(sessionId);
+        return container == null ? null : container.containerId();
+    }
+
+    public ExecutionResult executeCommand(String sessionId, String command, String cwd, int timeoutSeconds) {
+        SessionContainer container = ensureSessionContainer(sessionId);
+        String wrappedCommand = buildWrappedShellCommand(cwd, command);
+        return executeInContainer(container.containerId(), wrappedCommand, timeoutSeconds);
+    }
+
+    public ExecutionResult executePython(String sessionId, String script, int timeoutSeconds) {
+        String command = "python3 -c " + escapeShellArgument(script);
+        return executeCommand(sessionId, command, null, timeoutSeconds);
+    }
+
+    public String readTextFile(String sessionId, String path) {
+        String script = """
+                from pathlib import Path
+                print(Path(%s).read_text(encoding='utf-8'), end='')
+                """.formatted(toPythonStringLiteral(path));
+        ExecutionResult result = executeInContainer(
+                ensureSessionContainer(sessionId).containerId(),
+                "python3 - <<'PY'\n" + script + "\nPY",
+                config.getTimeout());
+        if (!result.isSuccess()) {
+            throw new RuntimeException("读取沙箱文件失败: " + result.getStderr());
+        }
+        return result.getStdout();
+    }
+
+    public void writeTextFile(String sessionId, String path, String content) {
+        String encoded = java.util.Base64.getEncoder().encodeToString(
+                (content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
+        String script = """
+                from pathlib import Path
+                import base64
+                file_path = Path(%s)
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(base64.b64decode(%s).decode('utf-8'), encoding='utf-8')
+                """.formatted(toPythonStringLiteral(path), toPythonStringLiteral(encoded));
+        ExecutionResult result = executeInContainer(
+                ensureSessionContainer(sessionId).containerId(),
+                "python3 - <<'PY'\n" + script + "\nPY",
+                config.getTimeout());
+        if (!result.isSuccess()) {
+            throw new RuntimeException("写入沙箱文件失败: " + result.getStderr());
+        }
+    }
+
+    public void destroySessionContainer(String sessionId) {
+        SessionContainer container = sessionContainers.remove(sessionId);
+        if (container == null) {
             return;
         }
-        
-        // 初始化 Docker 管理器
-        this.dockerManager = new DockerClientManager();
-        
-        try {
-            initializeContainer();
-        } catch (Exception e) {
-            log.error("初始化沙箱容器失败: {}", e.getMessage(), e);
-            throw new RuntimeException("沙箱初始化失败", e);
-        }
+        dockerManager.destroyContainer(container.containerId());
     }
-    
-    /**
-     * 初始化沙箱容器
-     */
-    private void initializeContainer() {
-        log.info("初始化沙箱容器...");
-        
-        // 拉取镜像
-        dockerManager.pullImageIfNeeded(config.getImage());
-        
-        // 创建容器
+
+    private SessionContainer createSessionContainer(String sessionId) {
+        String containerName = "openmanus-session-" + sessionId.toLowerCase().replaceAll("[^a-z0-9_-]", "-");
+        log.info("创建会话 Docker 沙箱: sessionId={}, image={}", sessionId, config.getImage());
         CreateContainerResponse container = dockerManager.getClient()
-            .createContainerCmd(config.getImage())
-            .withWorkingDir(config.getWorkDir())
-            .withHostConfig(HostConfig.newHostConfig()
-                .withMemory(DockerClientManager.parseMemoryLimit(config.getMemoryLimit()))
-                .withCpuQuota((long) (config.getCpuLimit() * 100000))
-                .withCpuPeriod(100000L)
-                .withNetworkMode(config.isNetworkEnabled() ? "bridge" : "none")
-                .withAutoRemove(true)
-            )
-            .withCmd("tail", "-f", "/dev/null")  // 保持容器运行
-            .exec();
-        
-        this.containerId = container.getId();
-        
-        // 启动容器
-        dockerManager.getClient().startContainerCmd(containerId).exec();
-        this.isRunning = true;
-        
-        log.info("沙箱容器启动成功: {}", containerId);
-    }
-    
-    /**
-     * 执行命令
-     * 
-     * @param command 要执行的命令
-     * @param timeoutSeconds 超时时间（秒），0 表示使用默认超时
-     * @return 执行结果
-     */
-    public ExecutionResult executeCommand(String command, int timeoutSeconds) {
-        if (!config.isUseSandbox()) {
-            return executeLocally(command, timeoutSeconds);
-        }
-        
-        if (!isRunning) {
-            throw new IllegalStateException("沙箱容器未运行");
-        }
-        
-        try {
-            // 创建执行实例
-            ExecCreateCmdResponse execCmd = dockerManager.getClient()
-                .execCreateCmd(containerId)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .withCmd("/bin/sh", "-c", command)
+                .createContainerCmd(config.getImage())
+                .withName(containerName + "-" + Instant.now().toEpochMilli())
+                .withWorkingDir(config.getWorkDir())
+                .withHostConfig(HostConfig.newHostConfig()
+                        .withMemory(DockerClientManager.parseMemoryLimit(config.getMemoryLimit()))
+                        .withCpuQuota((long) (config.getCpuLimit() * 100000))
+                        .withCpuPeriod(100000L)
+                        .withNetworkMode(config.isNetworkEnabled() ? "bridge" : "none")
+                        .withAutoRemove(false))
+                .withCmd("sh", "-lc", "mkdir -p " + escapeShellArgument(config.getWorkDir()) + " && tail -f /dev/null")
                 .exec();
-            
-            // 执行命令并捕获输出
+        String containerId = container.getId();
+        dockerManager.getClient().startContainerCmd(containerId).exec();
+        dockerManager.waitForContainerReady(containerId, Math.max(5, config.getTimeout()));
+        return new SessionContainer(sessionId, containerId, config.getWorkDir());
+    }
+
+    private ExecutionResult executeInContainer(String containerId, String command, int timeoutSeconds) {
+        try {
+            ExecCreateCmdResponse execCmd = dockerManager.getClient()
+                    .execCreateCmd(containerId)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .withCmd("/bin/sh", "-lc", command)
+                    .exec();
+
             ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-            
             @SuppressWarnings("deprecation")
             ExecStartResultCallback callback = new ExecStartResultCallback(stdout, stderr);
             dockerManager.getClient().execStartCmd(execCmd.getId()).exec(callback);
-            
-            // 等待执行完成
+
             int timeout = timeoutSeconds > 0 ? timeoutSeconds : config.getTimeout();
             boolean completed = callback.awaitCompletion(timeout, TimeUnit.SECONDS);
-            
             if (!completed) {
-                log.warn("命令执行超时: {} 秒", timeout);
                 return new ExecutionResult(
-                    stdout.toString(StandardCharsets.UTF_8),
-                    stderr.toString(StandardCharsets.UTF_8) + "\n执行超时",
-                    124
+                        stdout.toString(StandardCharsets.UTF_8),
+                        stderr.toString(StandardCharsets.UTF_8) + "\n执行超时",
+                        124
                 );
             }
-            
-            // 获取退出码
-            InspectExecResponse execResponse = dockerManager.getClient()
-                .inspectExecCmd(execCmd.getId()).exec();
-            Integer exitCode = execResponse.getExitCodeLong() != null ? 
-                execResponse.getExitCodeLong().intValue() : 0;
-            
+
+            InspectExecResponse execResponse = dockerManager.getClient().inspectExecCmd(execCmd.getId()).exec();
+            Integer exitCode = execResponse.getExitCodeLong() == null ? 0 : execResponse.getExitCodeLong().intValue();
             return new ExecutionResult(
-                stdout.toString(StandardCharsets.UTF_8),
-                stderr.toString(StandardCharsets.UTF_8),
-                exitCode
+                    stdout.toString(StandardCharsets.UTF_8),
+                    stderr.toString(StandardCharsets.UTF_8),
+                    exitCode
             );
-            
         } catch (Exception e) {
-            log.error("沙箱执行命令失败: {}", e.getMessage(), e);
+            log.error("会话容器执行失败: {}", e.getMessage(), e);
             return new ExecutionResult("", "沙箱执行失败: " + e.getMessage(), 1);
         }
     }
-    
-    /**
-     * 本地执行命令（沙箱禁用时）
-     */
-    private ExecutionResult executeLocally(String command, int timeoutSeconds) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder("/bin/sh", "-c", command);
-            pb.redirectErrorStream(false);
-            Process process = pb.start();
-            
-            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-            
-            // 读取输出流
-            Thread stdoutThread = new Thread(() -> {
-                try {
-                    process.getInputStream().transferTo(stdout);
-                } catch (IOException e) {
-                    log.error("读取 stdout 失败: {}", e.getMessage());
-                }
-            });
-            
-            Thread stderrThread = new Thread(() -> {
-                try {
-                    process.getErrorStream().transferTo(stderr);
-                } catch (IOException e) {
-                    log.error("读取 stderr 失败: {}", e.getMessage());
-                }
-            });
-            
-            stdoutThread.start();
-            stderrThread.start();
-            
-            // 等待进程完成
-            int timeout = timeoutSeconds > 0 ? timeoutSeconds : config.getTimeout();
-            boolean finished = process.waitFor(timeout, TimeUnit.SECONDS);
-            
-            if (!finished) {
-                process.destroyForcibly();
-                return new ExecutionResult(
-                    stdout.toString(StandardCharsets.UTF_8),
-                    stderr.toString(StandardCharsets.UTF_8) + "\n执行超时",
-                    124
-                );
-            }
-            
-            stdoutThread.join(1000);
-            stderrThread.join(1000);
-            
-            return new ExecutionResult(
-                stdout.toString(StandardCharsets.UTF_8),
-                stderr.toString(StandardCharsets.UTF_8),
-                process.exitValue()
-            );
-            
-        } catch (Exception e) {
-            log.error("本地执行命令失败: {}", e.getMessage(), e);
-            return new ExecutionResult("", "本地执行失败: " + e.getMessage(), 1);
-        }
+
+    private String buildWrappedShellCommand(String cwd, String command) {
+        String effectiveCommand = command == null ? "" : command;
+        String effectiveCwd = cwd == null || cwd.isBlank() ? config.getWorkDir() : cwd;
+        return "cd " + escapeShellArgument(effectiveCwd) + " && " + effectiveCommand;
     }
-    
-    /**
-     * 执行 Python 脚本
-     */
-    public ExecutionResult executePython(String script, int timeoutSeconds) {
-        String command = String.format("python3 -c %s", escapeShellArgument(script));
-        return executeCommand(command, timeoutSeconds);
+
+    private static String escapeShellArgument(String arg) {
+        return "'" + (arg == null ? "" : arg.replace("'", "'\"'\"'")) + "'";
     }
-    
-    /**
-     * 执行 Bash 脚本
-     */
-    public ExecutionResult executeBash(String script, int timeoutSeconds) {
-        return executeCommand(script, timeoutSeconds);
+
+    private static String toPythonStringLiteral(String value) {
+        String normalized = value == null ? "" : value;
+        return "'" + normalized
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                + "'";
     }
-    
-    /**
-     * Shell 参数转义
-     */
-    private String escapeShellArgument(String arg) {
-        return "'" + arg.replace("'", "'\"'\"'") + "'";
-    }
-    
+
     @Override
     public void close() throws IOException {
-        if (dockerManager != null && containerId != null && isRunning) {
-            try {
-                log.info("停止沙箱容器: {}", containerId);
-                dockerManager.getClient().stopContainerCmd(containerId).exec();
-                isRunning = false;
-                log.info("沙箱容器已停止");
-            } catch (Exception e) {
-                log.error("停止容器失败: {}", e.getMessage(), e);
-            }
+        for (String sessionId : sessionContainers.keySet()) {
+            destroySessionContainer(sessionId);
         }
-        
-        if (dockerManager != null) {
-            try {
-                dockerManager.close();
-            } catch (Exception e) {
-                log.error("关闭 Docker 管理器失败: {}", e.getMessage(), e);
-            }
-        }
+        dockerManager.close();
+    }
+
+    public record SessionContainer(String sessionId, String containerId, String workspaceRoot) {
     }
 }

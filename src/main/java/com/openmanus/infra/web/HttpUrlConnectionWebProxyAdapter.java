@@ -4,6 +4,10 @@ import com.openmanus.domain.service.WebProxyConfigProvider;
 import com.openmanus.domain.service.WebProxyFetchPort;
 import com.openmanus.domain.service.WebProxyResult;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.DataNode;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayOutputStream;
@@ -19,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Base64;
 
 @Component
 @Slf4j
@@ -69,7 +74,7 @@ public class HttpUrlConnectionWebProxyAdapter implements WebProxyFetchPort {
             try (InputStream stream = openResponseStream(connection, responseCode)) {
                 byte[] body = readBody(stream);
                 if (isHtml(contentType)) {
-                    String processed = processHtmlContent(new String(body, StandardCharsets.UTF_8), resolveHtmlBaseUrl(requestUri));
+                    String processed = processHtmlContent(new String(body, StandardCharsets.UTF_8), requestUri);
                     body = processed.getBytes(StandardCharsets.UTF_8);
                 }
                 return new WebProxyResult(
@@ -177,26 +182,113 @@ public class HttpUrlConnectionWebProxyAdapter implements WebProxyFetchPort {
         return contentType != null && contentType.toLowerCase().contains("text/html");
     }
 
-    private static String processHtmlContent(String content, String baseUrl) {
-        if (content.toLowerCase().contains("<base ")) {
-            return content;
+    private static String processHtmlContent(String content, URI requestUri) {
+        Document document = Jsoup.parse(content, currentDocumentBase(requestUri));
+        ensureHead(document);
+
+        rewriteAttributeUrls(document, requestUri, "a[href]", "href");
+        rewriteAttributeUrls(document, requestUri, "link[href]", "href");
+        rewriteAttributeUrls(document, requestUri, "script[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "img[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "iframe[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "source[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "video[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "audio[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "embed[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "object[data]", "data");
+        rewriteAttributeUrls(document, requestUri, "track[src]", "src");
+        rewriteAttributeUrls(document, requestUri, "form[action]", "action");
+
+        injectProxyRuntimePatch(document);
+        return document.outerHtml();
+    }
+
+    private static void ensureHead(Document document) {
+        if (document.head() != null) {
+            return;
         }
-        String baseTag = "<base href=\"" + baseUrl + "/\" target=\"_blank\">";
-        int headIndex = content.toLowerCase().indexOf("<head>");
-        if (headIndex != -1) {
-            int insertPos = headIndex + 6;
-            return content.substring(0, insertPos) + "\n" + baseTag + "\n" + content.substring(insertPos);
+        Element html = document.selectFirst("html");
+        if (html == null) {
+            document.appendElement("html");
+            html = document.selectFirst("html");
         }
-        int htmlIndex = content.toLowerCase().indexOf("<html");
-        if (htmlIndex != -1) {
-            int closeIndex = content.indexOf(">", htmlIndex);
-            if (closeIndex != -1) {
-                return content.substring(0, closeIndex + 1)
-                        + "\n<head>" + baseTag + "</head>\n"
-                        + content.substring(closeIndex + 1);
+        if (html != null) {
+            html.prependElement("head");
+        }
+    }
+
+    private static void rewriteAttributeUrls(Document document, URI requestUri, String selector, String attribute) {
+        for (Element element : document.select(selector)) {
+            String rawValue = element.attr(attribute);
+            if (rawValue == null || rawValue.isBlank()) {
+                continue;
+            }
+            String normalized = rawValue.trim();
+            if (isBypassScheme(normalized)) {
+                continue;
+            }
+            try {
+                URI resolved = requestUri.resolve(normalized);
+                String scheme = resolved.getScheme();
+                if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                    continue;
+                }
+                element.attr(attribute, buildProxyRedirectUrl(resolved.toString()));
+            } catch (IllegalArgumentException ignored) {
             }
         }
-        return content;
+    }
+
+    private static boolean isBypassScheme(String value) {
+        String lower = value.toLowerCase();
+        return lower.startsWith("javascript:")
+                || lower.startsWith("mailto:")
+                || lower.startsWith("tel:")
+                || lower.startsWith("data:")
+                || lower.startsWith("blob:")
+                || lower.startsWith("#");
+    }
+
+    private static void injectProxyRuntimePatch(Document document) {
+        String patchScript = """
+                (function () {
+                  const PROXY_PREFIX = '/api/proxy/web?url=';
+                  function toBase64Url(value) {
+                    return btoa(value).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/g, '');
+                  }
+                  function toProxyUrl(input) {
+                    try {
+                      const resolved = new URL(input, window.location.href);
+                      if (resolved.pathname === '/api/proxy/web') return resolved.toString();
+                      if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return input;
+                      return PROXY_PREFIX + toBase64Url(resolved.toString());
+                    } catch (error) {
+                      return input;
+                    }
+                  }
+                  const originalFetch = window.fetch;
+                  if (typeof originalFetch === 'function') {
+                    window.fetch = function (input, init) {
+                      if (typeof input === 'string') {
+                        return originalFetch.call(this, toProxyUrl(input), init);
+                      }
+                      if (input && input.url) {
+                        return originalFetch.call(this, toProxyUrl(input.url), init);
+                      }
+                      return originalFetch.call(this, input, init);
+                    };
+                  }
+                  const originalOpen = XMLHttpRequest.prototype.open;
+                  XMLHttpRequest.prototype.open = function (method, url) {
+                    const args = Array.prototype.slice.call(arguments);
+                    if (typeof url === 'string') {
+                      args[1] = toProxyUrl(url);
+                    }
+                    return originalOpen.apply(this, args);
+                  };
+                })();
+                """;
+        document.head().appendElement("script").appendChild(new DataNode(patchScript));
     }
 
     private String resolveRedirectUrl(String location, URI requestUri) {
@@ -253,7 +345,7 @@ public class HttpUrlConnectionWebProxyAdapter implements WebProxyFetchPort {
     }
 
     private static String buildProxyRedirectUrl(String redirectUrl) {
-        byte[] encoded = java.util.Base64.getUrlEncoder().encode(redirectUrl.getBytes(StandardCharsets.UTF_8));
-        return "/api/proxy/web?url=" + new String(encoded, StandardCharsets.UTF_8);
+        return "/api/proxy/web?url="
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(redirectUrl.getBytes(StandardCharsets.UTF_8));
     }
 }

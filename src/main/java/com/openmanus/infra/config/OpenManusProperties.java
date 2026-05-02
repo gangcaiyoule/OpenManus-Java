@@ -92,6 +92,17 @@ public class OpenManusProperties {
 
     @PostConstruct
     void applyEnvFallbacks() {
+        if (app != null) {
+            String defaultUserId = firstNonBlankEnv(
+                    "OPENMANUS_APP_DEFAULT_USER_ID",
+                    "OPENMANUS_APP_DEFAULTUSERID",
+                    "USER_ID"
+            );
+            if (!isBlank(defaultUserId)) {
+                app.setDefaultUserId(defaultUserId);
+            }
+        }
+
         if (llm != null && llm.getDefaultLlm() != null) {
             if (isBlank(llm.getDefaultLlm().getApiType())) {
                 String apiType = firstNonBlankEnv(
@@ -141,7 +152,7 @@ public class OpenManusProperties {
 
         if (search != null) {
             String apiKey = search.getApiKey();
-            if (isBlank(apiKey)) {
+            if (isBlank(apiKey) || isPlaceholder(apiKey)) {
                 String envKey = firstNonBlankEnv(
                         "OPENMANUS_SEARCH_API_KEY",
                         "OPENMANUS_SEARCH_APIKEY",
@@ -151,6 +162,54 @@ public class OpenManusProperties {
                 if (!isBlank(envKey)) {
                     search.setApiKey(envKey);
                 }
+            }
+        }
+
+        if (sandbox != null) {
+            String image = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_IMAGE"
+            );
+            if (!isBlank(image)) {
+                sandbox.setImage(image);
+            }
+
+            String workDir = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_WORK_DIR",
+                    "OPENMANUS_SANDBOX_WORKDIR"
+            );
+            if (!isBlank(workDir)) {
+                sandbox.setWorkDir(workDir);
+            }
+
+            String memoryLimit = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_MEMORY_LIMIT",
+                    "OPENMANUS_SANDBOX_MEMORYLIMIT"
+            );
+            if (!isBlank(memoryLimit)) {
+                sandbox.setMemoryLimit(memoryLimit);
+            }
+
+            String cpuLimit = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_CPU_LIMIT",
+                    "OPENMANUS_SANDBOX_CPULIMIT"
+            );
+            if (!isBlank(cpuLimit)) {
+                sandbox.setCpuLimit(parsePositiveDouble(cpuLimit, sandbox.getCpuLimit()));
+            }
+
+            String timeout = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_TIMEOUT"
+            );
+            if (!isBlank(timeout)) {
+                sandbox.setTimeout(parsePositiveInt(timeout, sandbox.getTimeout()));
+            }
+
+            String networkEnabled = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_NETWORK_ENABLED",
+                    "OPENMANUS_SANDBOX_NETWORKENABLED"
+            );
+            if (!isBlank(networkEnabled)) {
+                sandbox.setNetworkEnabled(parseBooleanStrict(networkEnabled, sandbox.isNetworkEnabled()));
             }
         }
 
@@ -375,6 +434,24 @@ public class OpenManusProperties {
                             maxIndexEntries, chatMemory.getToolResultArtifactMaxIndexEntriesPerMemory()));
                 }
             }
+            if (chatMemory.shellToolEnabled == null) {
+                String shellEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_ENABLED");
+                if (!isBlank(shellEnabled)) {
+                    chatMemory.setShellToolEnabled(parseBooleanStrict(shellEnabled, chatMemory.isShellToolEnabled()));
+                }
+            }
+            if (chatMemory.shellToolTimeoutSeconds == null) {
+                String shellTimeout = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_TIMEOUT_SECONDS");
+                if (!isBlank(shellTimeout)) {
+                    chatMemory.setShellToolTimeoutSeconds(parsePositiveInt(shellTimeout, chatMemory.getShellToolTimeoutSeconds()));
+                }
+            }
+            if (chatMemory.shellToolMaxOutputChars == null) {
+                String shellMax = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_MAX_OUTPUT_CHARS");
+                if (!isBlank(shellMax)) {
+                    chatMemory.setShellToolMaxOutputChars(parsePositiveInt(shellMax, chatMemory.getShellToolMaxOutputChars()));
+                }
+            }
             if (chatMemory.getModelContextMaxTotalMessages() == 1) {
                 log.warn("openmanus.chat-memory.model-context-max-total-messages=1 is an extreme mode; "
                         + "current user continuity is prioritized and system/history may be dropped for that round.");
@@ -411,6 +488,17 @@ public class OpenManusProperties {
         return s == null || s.trim().isEmpty();
     }
 
+    private static boolean isPlaceholder(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        String lower = s.toLowerCase(Locale.ROOT);
+        return lower.startsWith("your-")
+                || lower.contains("placeholder")
+                || lower.contains("<your")
+                || lower.contains("your-api-key");
+    }
+
     private static String firstNonBlankEnv(String... names) {
         for (String name : names) {
             String value = System.getProperty(name);
@@ -438,6 +526,15 @@ public class OpenManusProperties {
         try {
             int parsed = Integer.parseInt(value.trim());
             return parsed >= 0 ? parsed : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static double parsePositiveDouble(String value, double fallback) {
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            return parsed > 0 ? parsed : fallback;
         } catch (NumberFormatException e) {
             return fallback;
         }
@@ -502,6 +599,7 @@ public class OpenManusProperties {
         private String version = "1.0.0";
         private String workspaceRoot = "./workspace";
         private String logLevel = "INFO";
+        private String defaultUserId = "001";
     }
     
     /**
@@ -515,9 +613,9 @@ public class OpenManusProperties {
         
         @Data
         public static class DefaultLLM {
-            private String model = "gpt-5.4";
-            private String baseUrl = "https://api.openai.com/v1";
-            private String apiType = "openai";
+            private String model = "";
+            private String baseUrl = "";
+            private String apiType = "";
             private Double temperature = 0.7;
             private Integer maxTokens = 8192;
             private Integer timeout = 120;
@@ -540,7 +638,6 @@ public class OpenManusProperties {
      */
     @Data
     public static class SandboxSettings {
-        private boolean useSandbox = false;
         private String image = "python:3.9-slim";
         private String workDir = "/workspace";
         private String memoryLimit = "512m";
@@ -668,6 +765,9 @@ public class OpenManusProperties {
         private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_CHARS = 8000;
         private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND = 2;
         private static final int DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY = 20000;
+        private static final boolean DEFAULT_SHELL_TOOL_ENABLED = true;
+        private static final int DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS = 15;
+        private static final int DEFAULT_SHELL_TOOL_MAX_OUTPUT_CHARS = 8000;
 
         /**
          * Chat memory store type: file | in-memory.
@@ -797,6 +897,18 @@ public class OpenManusProperties {
          * Exceeded history is pruned from the index tail to avoid long-running sessions becoming slow.
          */
         private Integer toolResultArtifactMaxIndexEntriesPerMemory = null;
+        /**
+         * Whether to enable generic shell tool for model-driven file discovery and partial reads.
+         */
+        private Boolean shellToolEnabled = null;
+        /**
+         * Timeout seconds for one shell command execution.
+         */
+        private Integer shellToolTimeoutSeconds = null;
+        /**
+         * Max chars returned in stdout/stderr preview. Excess output is offloaded to artifact or file snapshot.
+         */
+        private Integer shellToolMaxOutputChars = null;
 
         public boolean isCompactToolResultsEnabled() {
             return Boolean.TRUE.equals(compactToolResultsEnabled);
@@ -946,6 +1058,18 @@ public class OpenManusProperties {
             return toolResultArtifactMaxIndexEntriesPerMemory == null
                     ? DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY
                     : toolResultArtifactMaxIndexEntriesPerMemory;
+        }
+
+        public boolean isShellToolEnabled() {
+            return shellToolEnabled == null ? DEFAULT_SHELL_TOOL_ENABLED : Boolean.TRUE.equals(shellToolEnabled);
+        }
+
+        public int getShellToolTimeoutSeconds() {
+            return shellToolTimeoutSeconds == null ? DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS : shellToolTimeoutSeconds;
+        }
+
+        public int getShellToolMaxOutputChars() {
+            return shellToolMaxOutputChars == null ? DEFAULT_SHELL_TOOL_MAX_OUTPUT_CHARS : shellToolMaxOutputChars;
         }
 
         /**

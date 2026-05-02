@@ -1,12 +1,13 @@
 package com.openmanus.infra.web;
 
-import com.openmanus.domain.model.WorkflowErrorCodes;
-import com.openmanus.domain.model.WorkflowRequest;
-import com.openmanus.domain.model.WorkflowResponse;
-import com.openmanus.domain.service.AgentService;
+import com.openmanus.domain.model.ExecutionErrorCodes;
+import com.openmanus.domain.model.ExecutionRequest;
+import com.openmanus.domain.model.ExecutionResponse;
+import com.openmanus.domain.service.ConversationApplicationService;
+import com.openmanus.domain.service.ExecutionStreamingApplicationService;
 import com.openmanus.domain.service.SessionIdPolicy;
-import com.openmanus.domain.service.SessionSandboxManager;
-import com.openmanus.domain.service.WorkflowStreamService;
+import com.openmanus.sandbox.domain.model.SessionSandboxInfo;
+import com.openmanus.sandbox.application.SandboxSessionApplicationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
@@ -19,7 +20,7 @@ import java.util.concurrent.CompletableFuture;
 
 /**
  * REST controller for interacting with Agent capabilities.
- * 提供统一工作流的不同交互入口（HTTP对话 / WebSocket流式）。
+ * 提供统一执行链路的不同交互入口（HTTP 对话 / WebSocket 流式）。
  */
 @RestController
 @RequestMapping("/api/agent")
@@ -30,20 +31,20 @@ public class AgentController {
     private static final String ERROR_ASYNC_SUBMIT_EXCEPTION = "任务提交异常，请稍后重试";
     private static final String EXECUTION_TOPIC_PREFIX = "/topic/executions/";
 
-    private final AgentService agentService;
-    private final WorkflowStreamService workflowStreamService;
-    private final SessionSandboxManager sessionSandboxManager;
+    private final ConversationApplicationService conversationApplicationService;
+    private final ExecutionStreamingApplicationService executionStreamingApplicationService;
+    private final SandboxSessionApplicationService sandboxSessionApplicationService;
     
     public AgentController(
-            AgentService agentService, 
-            WorkflowStreamService workflowStreamService,
-            SessionSandboxManager sessionSandboxManager) {
-        this.agentService = agentService;
-        this.workflowStreamService = workflowStreamService;
-        this.sessionSandboxManager = sessionSandboxManager;
+            ConversationApplicationService conversationApplicationService,
+            ExecutionStreamingApplicationService executionStreamingApplicationService,
+            SandboxSessionApplicationService sandboxSessionApplicationService) {
+        this.conversationApplicationService = conversationApplicationService;
+        this.executionStreamingApplicationService = executionStreamingApplicationService;
+        this.sandboxSessionApplicationService = sandboxSessionApplicationService;
     }
     /**
-     * 统一工作流（HTTP 对话入口）
+     * 执行链路（HTTP 对话入口）
      *
      * @param payload 包含"message"和可选的"conversationId"
      * @param stateful 是否保持会话状态
@@ -52,8 +53,8 @@ public class AgentController {
      */
     @PostMapping("/chat")
     @Operation(
-        summary = "Unified Workflow (HTTP Chat)",
-        description = "Single-agent unified workflow over HTTP. Supports both stateless and stateful conversation."
+        summary = "Agent Execution (HTTP Chat)",
+        description = "Agent execution over HTTP. Supports both stateless and stateful conversation."
     )
     public CompletableFuture<ResponseEntity<Map<String, Object>>> chat(
             @RequestBody Map<String, String> payload,
@@ -74,7 +75,7 @@ public class AgentController {
         }
 
         try {
-            return agentService.chat(message, conversationId, sync)
+            return conversationApplicationService.chat(message, conversationId, sync)
                     .handle((result, throwable) -> throwable == null
                             ? toChatResponse(result)
                             : buildChatInternalErrorResponse(conversationId));
@@ -84,20 +85,20 @@ public class AgentController {
     }
 
     /**
-     * 统一工作流（流式入口）
+     * 执行链路（流式入口）
      *
-     * @param workflowRequest 包含用户输入的请求
+     * @param executionRequest 包含用户输入的请求
      * @return 立即返回一个包含sessionId的响应，用于WebSocket订阅
      */
-    @PostMapping("/workflow-stream")
+    @PostMapping({"/execution-stream", "/workflow-stream"})
     @Operation(
-            summary = "Unified Workflow (Streaming)",
-            description = "Runs the same single-agent workflow and returns a session ID for WebSocket streaming."
+            summary = "Agent Execution (Streaming)",
+            description = "Runs the same agent execution pipeline and returns a session ID for WebSocket streaming."
     )
-    public ResponseEntity<WorkflowStreamResponse> workflowStream(
-            @RequestBody WorkflowRequest workflowRequest) {
-        String userInput = workflowRequest.getInput();
-        WorkflowResponse serviceResult = workflowStreamService.executeWorkflowAndStreamEvents(userInput);
+    public ResponseEntity<ExecutionStreamResponse> executionStream(
+            @RequestBody ExecutionRequest executionRequest) {
+        String userInput = executionRequest.getInput();
+        ExecutionResponse serviceResult = executionStreamingApplicationService.executeAndStreamEvents(userInput);
 
         if (!serviceResult.isSuccess()) {
             HttpStatus status = resolveErrorStatus(serviceResult.getErrorCode(), serviceResult.getError());
@@ -108,17 +109,17 @@ public class AgentController {
         String sessionId = serviceResult.getSessionId();
         if (sessionId == null) {
             // 如果没有sessionId，返回一个错误
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(WorkflowStreamResponse.builder()
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ExecutionStreamResponse.builder()
                     .success(false)
-                    .error("无法启动工作流：未生成会话ID")
-                    .errorCode(WorkflowErrorCodes.INTERNAL_ERROR)
+                    .error("无法启动执行链路：未生成会话ID")
+                    .errorCode(ExecutionErrorCodes.INTERNAL_ERROR)
                     .build());
         }
         return ResponseEntity.ok(toStreamResponse(serviceResult));
     }
 
-    private WorkflowStreamResponse toStreamResponse(WorkflowResponse serviceResult) {
-        WorkflowStreamResponse.WorkflowStreamResponseBuilder builder = WorkflowStreamResponse.builder()
+    private ExecutionStreamResponse toStreamResponse(ExecutionResponse serviceResult) {
+        ExecutionStreamResponse.ExecutionStreamResponseBuilder builder = ExecutionStreamResponse.builder()
                 .success(serviceResult.isSuccess())
                 .sessionId(serviceResult.getSessionId())
                 .error(serviceResult.getError())
@@ -130,14 +131,14 @@ public class AgentController {
     }
 
     private HttpStatus resolveErrorStatus(String errorCode, String error) {
-        if (WorkflowErrorCodes.INPUT_INVALID.equals(errorCode)) {
+        if (ExecutionErrorCodes.INPUT_INVALID.equals(errorCode)) {
             return HttpStatus.BAD_REQUEST;
         }
-        if (WorkflowErrorCodes.ASYNC_SUBMIT_REJECTED.equals(errorCode)
-                || WorkflowErrorCodes.ASYNC_SUBMIT_EXCEPTION.equals(errorCode)) {
+        if (ExecutionErrorCodes.ASYNC_SUBMIT_REJECTED.equals(errorCode)
+                || ExecutionErrorCodes.ASYNC_SUBMIT_EXCEPTION.equals(errorCode)) {
             return HttpStatus.SERVICE_UNAVAILABLE;
         }
-        if (WorkflowErrorCodes.INTERNAL_ERROR.equals(errorCode)) {
+        if (ExecutionErrorCodes.INTERNAL_ERROR.equals(errorCode)) {
             return HttpStatus.INTERNAL_SERVER_ERROR;
         }
 
@@ -172,7 +173,7 @@ public class AgentController {
     private ResponseEntity<Map<String, Object>> buildChatInternalErrorResponse(String conversationId) {
         Map<String, Object> error = new HashMap<>();
         error.put("error", "内部错误，请稍后重试");
-        error.put("errorCode", WorkflowErrorCodes.INTERNAL_ERROR);
+        error.put("errorCode", ExecutionErrorCodes.INTERNAL_ERROR);
         if (conversationId != null && !conversationId.isBlank()) {
             error.put("conversationId", conversationId);
         }
@@ -182,7 +183,7 @@ public class AgentController {
     private Map<String, Object> buildInputInvalidError(String errorMessage, String conversationId) {
         Map<String, Object> error = new HashMap<>();
         error.put("error", errorMessage);
-        error.put("errorCode", WorkflowErrorCodes.INPUT_INVALID);
+        error.put("errorCode", ExecutionErrorCodes.INPUT_INVALID);
         if (conversationId != null && !conversationId.isBlank()) {
             error.put("conversationId", conversationId);
         }
@@ -191,9 +192,9 @@ public class AgentController {
 
     private String inferChatErrorCode(String errorMessage) {
         if ("message不能为空".equals(errorMessage)) {
-            return WorkflowErrorCodes.INPUT_INVALID;
+            return ExecutionErrorCodes.INPUT_INVALID;
         }
-        return WorkflowErrorCodes.INTERNAL_ERROR;
+        return ExecutionErrorCodes.INTERNAL_ERROR;
     }
 
     private String stringValue(Object value) {
@@ -222,23 +223,61 @@ public class AgentController {
     public ResponseEntity<Map<String, Object>> getSessionInfo(@PathVariable String sessionId) {
         String normalizedSessionId = normalizeConversationId(sessionId);
         if (normalizedSessionId == null) {
-            Map<String, Object> error = new HashMap<>();
-            error.put("error", "sessionId非法");
-            error.put("errorCode", WorkflowErrorCodes.INPUT_INVALID);
-            return ResponseEntity.badRequest().body(error);
+            return ResponseEntity.badRequest().body(buildSessionIdInvalidError());
         }
 
+        return ResponseEntity.ok(buildSessionInfoResponse(
+                normalizedSessionId,
+                sandboxSessionApplicationService.getSandboxInfo(normalizedSessionId).orElse(null)
+        ));
+    }
+
+    /**
+     * 显式创建/启动会话沙箱。
+     *
+     * @param sessionId 会话 ID
+     * @return 启动后的会话沙箱信息
+     */
+    @PostMapping("/session/{sessionId}/sandbox/start")
+    @Operation(
+        summary = "Start Session Sandbox",
+        description = "Creates or reuses the session sandbox and returns its current status and VNC URL."
+    )
+    public ResponseEntity<Map<String, Object>> startSessionSandbox(@PathVariable String sessionId) {
+        String normalizedSessionId = normalizeConversationId(sessionId);
+        if (normalizedSessionId == null) {
+            return ResponseEntity.badRequest().body(buildSessionIdInvalidError());
+        }
+
+        try {
+            SessionSandboxInfo sandboxInfo = sandboxSessionApplicationService.getOrCreateSandbox(normalizedSessionId);
+            return ResponseEntity.ok(buildSessionInfoResponse(normalizedSessionId, sandboxInfo));
+        } catch (RuntimeException e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("sessionId", normalizedSessionId);
+            error.put("error", "沙箱启动失败: " + e.getMessage());
+            error.put("errorCode", ExecutionErrorCodes.INTERNAL_ERROR);
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(error);
+        }
+    }
+
+    private Map<String, Object> buildSessionIdInvalidError() {
+        Map<String, Object> error = new HashMap<>();
+        error.put("error", "sessionId非法");
+        error.put("errorCode", ExecutionErrorCodes.INPUT_INVALID);
+        return error;
+    }
+
+    private Map<String, Object> buildSessionInfoResponse(String sessionId, SessionSandboxInfo sandboxInfo) {
         Map<String, Object> response = new HashMap<>();
-        response.put("sessionId", normalizedSessionId);
-        
-        // 查询沙箱信息
-        sessionSandboxManager.getSandboxInfo(normalizedSessionId).ifPresent(sandboxInfo -> {
+        response.put("sessionId", sessionId);
+        if (sandboxInfo != null) {
+            response.put("sandboxWorkspaceRoot", sandboxInfo.getWorkspaceRoot());
             response.put("sandboxVncUrl", sandboxInfo.getVncUrl());
-            response.put("sandboxStatus", sandboxInfo.getStatus().toString());
+            response.put("sandboxStatus", sandboxInfo.getStatus() == null ? "" : sandboxInfo.getStatus().toString());
             response.put("sandboxCreatedAt", sandboxInfo.getCreatedAt());
             response.put("sandboxAvailable", sandboxInfo.isAvailable());
-        });
-        
-        return ResponseEntity.ok(response);
+        }
+        return response;
     }
 } 

@@ -18,7 +18,6 @@ openmanus:
 
   sandbox:
     type: "docker"
-    use-sandbox: false
     image: "python:3.11-slim"
     work-dir: "/workspace"
     memory-limit: "512m"
@@ -36,6 +35,9 @@ openmanus:
     enabled: false
     http-proxy: ""
     https-proxy: ""
+
+  web-proxy:
+    enabled: true
 
   search:
     engine: "google"

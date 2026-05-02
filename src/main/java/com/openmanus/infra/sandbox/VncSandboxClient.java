@@ -1,18 +1,23 @@
 package com.openmanus.infra.sandbox;
 
 import com.github.dockerjava.api.command.CreateContainerResponse;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.model.ExposedPort;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.PortBinding;
 import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.core.command.ExecStartResultCallback;
 import com.openmanus.infra.config.OpenManusProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.TimeUnit;
 
 /**
  * VNC 图形界面沙箱客户端
@@ -36,21 +41,8 @@ public class VncSandboxClient implements Closeable {
     
     private final DockerClientManager dockerManager;
     private final String hostAddress;
-    private final boolean enabled;
     
     public VncSandboxClient(OpenManusProperties properties) {
-        boolean useSandbox = properties != null
-                && properties.getSandbox() != null
-                && properties.getSandbox().isUseSandbox();
-        if (!useSandbox) {
-            this.enabled = false;
-            this.dockerManager = null;
-            this.hostAddress = resolveHostAddress();
-            log.info("VNC 沙箱已禁用（openmanus.sandbox.use-sandbox=false）");
-            return;
-        }
-
-        this.enabled = true;
         this.dockerManager = new DockerClientManager();
         this.hostAddress = resolveHostAddress();
         
@@ -72,7 +64,8 @@ public class VncSandboxClient implements Closeable {
             dockerManager.pullImageIfNeeded(VNC_IMAGE);
             
             // 创建容器
-            String containerName = "vnc-sandbox-" + sessionId;
+            String containerName = "vnc-sandbox-" + sessionId.toLowerCase().replaceAll("[^a-z0-9_-]", "-")
+                    + "-" + System.currentTimeMillis();
             CreateContainerResponse container = dockerManager.getClient()
                 .createContainerCmd(VNC_IMAGE)
                 .withName(containerName)
@@ -112,7 +105,12 @@ public class VncSandboxClient implements Closeable {
             int mappedPort = dockerManager.getContainerMappedPort(containerId, VNC_WEB_PORT);
             
             // 生成访问 URL
-            String vncUrl = String.format("http://%s:%d/vnc.html", hostAddress, mappedPort);
+            String vncUrl = String.format(
+                    "http://%s:%d/vnc.html?autoconnect=true&resize=remote&password=%s",
+                    hostAddress,
+                    mappedPort,
+                    VNC_PASSWORD
+            );
             
             VncSandboxInfo sandboxInfo = new VncSandboxInfo(containerId, vncUrl, mappedPort);
             log.info("VNC 沙箱创建完成: {}", sandboxInfo);
@@ -129,7 +127,7 @@ public class VncSandboxClient implements Closeable {
      * 销毁 VNC 沙箱
      */
     public void destroyVncSandbox(String containerId) {
-        if (!enabled || dockerManager == null) {
+        if (dockerManager == null) {
             return;
         }
         dockerManager.destroyContainer(containerId);
@@ -139,10 +137,37 @@ public class VncSandboxClient implements Closeable {
      * 检查容器是否运行
      */
     public boolean isContainerRunning(String containerId) {
-        if (!enabled || dockerManager == null) {
+        if (dockerManager == null) {
             return false;
         }
         return dockerManager.isContainerRunning(containerId);
+    }
+
+    public ExecutionResult openBrowserUrl(String containerId, String url) {
+        if (containerId == null || containerId.isBlank()) {
+            return new ExecutionResult("", "VNC containerId is blank", 1);
+        }
+        if (url == null || url.isBlank()) {
+            return new ExecutionResult("", "URL is blank", 1);
+        }
+        String command = """
+                export URL=%s
+                export DISPLAY=${DISPLAY:-:1}
+                nohup sh -lc '
+                  for browser in chromium-browser chromium google-chrome firefox xdg-open; do
+                    if command -v "$browser" >/dev/null 2>&1; then
+                      if [ "$browser" = "xdg-open" ]; then
+                        exec "$browser" "$URL"
+                      fi
+                      exec "$browser" --no-sandbox "$URL"
+                    fi
+                  done
+                  echo "no browser found" >&2
+                  exit 127
+                ' >/tmp/openmanus-browser.log 2>&1 &
+                echo "browser-open-started"
+                """.formatted(escapeShellArgument(url));
+        return executeInContainer(containerId, command, 8);
     }
     
     /**
@@ -156,12 +181,52 @@ public class VncSandboxClient implements Closeable {
                 return envHost;
             }
             
-            // 否则获取本机地址
-            return InetAddress.getLocalHost().getHostAddress();
+            // 默认给本机浏览器可访问的地址，避免局域网/主机名解析导致 iframe 空白。
+            return "localhost";
         } catch (Exception e) {
             log.warn("无法获取宿主机地址，使用 localhost: {}", e.getMessage());
             return "localhost";
         }
+    }
+
+    private ExecutionResult executeInContainer(String containerId, String command, int timeoutSeconds) {
+        try {
+            ExecCreateCmdResponse execCmd = dockerManager.getClient()
+                    .execCreateCmd(containerId)
+                    .withAttachStdout(true)
+                    .withAttachStderr(true)
+                    .withCmd("/bin/sh", "-lc", command)
+                    .exec();
+            ByteArrayOutputStream stdout = new ByteArrayOutputStream();
+            ByteArrayOutputStream stderr = new ByteArrayOutputStream();
+            @SuppressWarnings("deprecation")
+            ExecStartResultCallback callback = new ExecStartResultCallback(stdout, stderr);
+            dockerManager.getClient().execStartCmd(execCmd.getId()).exec(callback);
+            boolean completed = callback.awaitCompletion(timeoutSeconds, TimeUnit.SECONDS);
+            if (!completed) {
+                return new ExecutionResult(
+                        stdout.toString(StandardCharsets.UTF_8),
+                        stderr.toString(StandardCharsets.UTF_8) + "\n执行超时",
+                        124
+                );
+            }
+            Long exitCode = dockerManager.getClient()
+                    .inspectExecCmd(execCmd.getId())
+                    .exec()
+                    .getExitCodeLong();
+            return new ExecutionResult(
+                    stdout.toString(StandardCharsets.UTF_8),
+                    stderr.toString(StandardCharsets.UTF_8),
+                    exitCode == null ? 0 : exitCode.intValue()
+            );
+        } catch (Exception e) {
+            log.error("VNC 容器执行失败: {}", e.getMessage(), e);
+            return new ExecutionResult("", "VNC 容器执行失败: " + e.getMessage(), 1);
+        }
+    }
+
+    private static String escapeShellArgument(String value) {
+        return "'" + (value == null ? "" : value.replace("'", "'\"'\"'")) + "'";
     }
     
     @Override
@@ -173,8 +238,8 @@ public class VncSandboxClient implements Closeable {
     }
 
     private void ensureEnabled() {
-        if (!enabled || dockerManager == null) {
-            throw new IllegalStateException("VNC 沙箱已禁用，未初始化 Docker 客户端");
+        if (dockerManager == null) {
+            throw new IllegalStateException("VNC 沙箱未初始化 Docker 客户端");
         }
     }
 }

@@ -1,15 +1,15 @@
 package com.openmanus.infra.config;
 
-import com.openmanus.domain.service.AgentService;
-import com.openmanus.domain.service.SessionFileSandboxDirectoryProvider;
-import com.openmanus.domain.service.SessionSandboxClient;
-import com.openmanus.domain.service.SessionSandboxManager;
+import com.openmanus.domain.service.ConversationApplicationService;
+import com.openmanus.domain.service.AgentExecutionPort;
+import com.openmanus.domain.service.ExecutionStreamingApplicationService;
+import com.openmanus.domain.service.ExecutionEventPort;
+import com.openmanus.domain.service.ExecutionStreamPublisher;
 import com.openmanus.domain.service.WebProxyFetchPort;
 import com.openmanus.domain.service.WebProxyService;
-import com.openmanus.domain.service.WorkflowExecutionEventPort;
-import com.openmanus.domain.service.WorkflowExecutionPort;
-import com.openmanus.domain.service.WorkflowStreamPublisher;
-import com.openmanus.domain.service.WorkflowStreamService;
+import com.openmanus.sandbox.application.SandboxSessionApplicationService;
+import com.openmanus.sandbox.domain.port.SandboxRuntimePort;
+import com.openmanus.sandbox.domain.port.SandboxWorkspacePort;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -20,18 +20,18 @@ import java.util.concurrent.Executor;
 public class DomainServiceConfig {
 
     @Bean
-    AgentService agentService(WorkflowExecutionPort workflowExecutionPort,
-                              WorkflowExecutionEventPort executionEventPort) {
-        return new AgentService(workflowExecutionPort, executionEventPort);
+    ConversationApplicationService conversationApplicationService(AgentExecutionPort agentExecutionPort,
+                                                                  ExecutionEventPort executionEventPort) {
+        return new ConversationApplicationService(agentExecutionPort, executionEventPort);
     }
 
     @Bean
-    WorkflowStreamService workflowStreamService(WorkflowExecutionPort workflowExecutionPort,
-                                                WorkflowExecutionEventPort executionEventPort,
-                                                WorkflowStreamPublisher streamPublisher,
-                                                @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor) {
-        return new WorkflowStreamService(
-                workflowExecutionPort,
+    ExecutionStreamingApplicationService executionStreamingApplicationService(AgentExecutionPort agentExecutionPort,
+                                                                             ExecutionEventPort executionEventPort,
+                                                                             ExecutionStreamPublisher streamPublisher,
+                                                                             @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor) {
+        return new ExecutionStreamingApplicationService(
+                agentExecutionPort,
                 executionEventPort,
                 streamPublisher,
                 asyncExecutor
@@ -39,9 +39,9 @@ public class DomainServiceConfig {
     }
 
     @Bean
-    SessionSandboxManager sessionSandboxManager(SessionSandboxClient sessionSandboxClient,
-                                                SessionFileSandboxDirectoryProvider fileSandboxDirectoryProvider) {
-        return new SessionSandboxManager(sessionSandboxClient, fileSandboxDirectoryProvider);
+    SandboxSessionApplicationService sandboxSessionApplicationService(SandboxRuntimePort sandboxRuntimePort,
+                                                                     SandboxWorkspacePort sandboxWorkspacePort) {
+        return new SandboxSessionApplicationService(sandboxRuntimePort, sandboxWorkspacePort);
     }
 
     @Bean

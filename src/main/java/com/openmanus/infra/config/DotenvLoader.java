@@ -28,6 +28,7 @@ public final class DotenvLoader {
         if (path == null || !Files.isRegularFile(path)) {
             return;
         }
+        log.info("DotenvLoader: Loading .env from {}", path.toAbsolutePath());
         try {
             List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
             for (String rawLine : lines) {
@@ -48,9 +49,11 @@ public final class DotenvLoader {
                     continue;
                 }
                 if (hasNonBlankOverride(key)) {
+                    log.debug("DotenvLoader: Skipping {} (already set via env/sysprop)", key);
                     continue;
                 }
                 System.setProperty(key, value);
+                log.info("DotenvLoader: Set {}={}", key, key.contains("KEY") || key.contains("SECRET") ? "***" : value);
             }
         } catch (IOException e) {
             log.warn("Failed to load .env file from {}", path.toAbsolutePath(), e);

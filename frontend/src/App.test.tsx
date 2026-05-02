@@ -5,6 +5,9 @@ import App from './App';
 
 const mockStartWorkflow = vi.fn();
 const mockGetSessionInfo = vi.fn();
+const mockGetSessionEvents = vi.fn();
+const mockStartSessionSandbox = vi.fn();
+const mockInspectProxyPreview = vi.fn();
 const mockDisconnect = vi.fn();
 const mockConnect = vi.fn();
 const mockSubscribe = vi.fn();
@@ -12,7 +15,10 @@ const mockSubscribe = vi.fn();
 vi.mock('./api/agentApi', () => ({
   ApiError: class ApiError extends Error {},
   startWorkflow: (...args: unknown[]) => mockStartWorkflow(...args),
-  getSessionInfo: (...args: unknown[]) => mockGetSessionInfo(...args)
+  getSessionInfo: (...args: unknown[]) => mockGetSessionInfo(...args),
+  getSessionEvents: (...args: unknown[]) => mockGetSessionEvents(...args),
+  startSessionSandbox: (...args: unknown[]) => mockStartSessionSandbox(...args),
+  inspectProxyPreview: (...args: unknown[]) => mockInspectProxyPreview(...args)
 }));
 
 vi.mock('./ws/workflowSocketClient', () => ({
@@ -34,7 +40,32 @@ describe('App', () => {
       sandboxAvailable: true,
       sandboxVncUrl: 'https://vnc.local'
     });
+    mockStartSessionSandbox.mockResolvedValue({
+      sessionId: 's-1',
+      sandboxAvailable: true,
+      sandboxVncUrl: 'https://vnc.local'
+    });
+    mockInspectProxyPreview.mockResolvedValue({
+      enabled: true,
+      targetUrl: 'https://www.google.com/search?q=openai+docs',
+      proxyUrl: '/api/proxy/web?url=abc',
+      state: 'proxy-rendered',
+      reasonCode: '',
+      reason: '',
+      previewMode: 'proxy',
+      previewableHtml: true,
+      fallbackToVnc: false
+    });
+    mockGetSessionEvents.mockResolvedValue([]);
     mockSubscribe.mockImplementation((_topic: string, handlers: Record<string, (...args: unknown[]) => void>) => {
+      handlers.onEvent?.({
+        eventType: 'SEARCH_STARTED',
+        metadata: {
+          query: 'openai docs',
+          searchPageUrl: 'https://www.google.com/search?q=openai+docs',
+          previewMode: 'web'
+        }
+      });
       handlers.onEvent?.({
         eventType: 'TOOL_CALL_END',
         agentName: 'Browser',
@@ -74,11 +105,13 @@ describe('App', () => {
 
   it('switches between search and tool output tabs', async () => {
     render(<App />);
-    expect(screen.getByText('No search results yet')).toBeInTheDocument();
+    expect(screen.getByText('No search events yet')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Web Status' }));
+    expect(screen.getByText('No web status yet')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Tool Output' }));
     expect(screen.getByText('No tool output yet')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Search Results' }));
-    expect(screen.getByText('No search results yet')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Search Trail' }));
+    expect(screen.getByText('No search events yet')).toBeInTheDocument();
   });
 
   it('sends message and renders assistant result with tool output', async () => {
@@ -89,12 +122,15 @@ describe('App', () => {
     await waitFor(() => {
       expect(mockStartWorkflow).toHaveBeenCalledTimes(1);
     });
+    expect(mockStartSessionSandbox).toHaveBeenCalledWith('s-1');
     const assistantResultTexts = await screen.findAllByText('assistant result');
     expect(assistantResultTexts.length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByRole('button', { name: 'Tool Output' }));
     const toolOutputTexts = await screen.findAllByText('tool output content');
     expect(toolOutputTexts.length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Search Trail' }));
+    expect(screen.getByText('搜索已发起')).toBeInTheDocument();
   });
 
   it('clears prompt input', async () => {
@@ -143,5 +179,120 @@ describe('App', () => {
     await userEvent.click(screen.getByRole('button', { name: 'VNC' }));
     const vncFrame = screen.getByTitle('vnc-preview');
     expect(vncFrame).toHaveAttribute('src', 'https://vnc.local');
+  });
+
+  it('auto switches to vnc when proxy preview is blocked', async () => {
+    mockInspectProxyPreview.mockResolvedValueOnce({
+      enabled: true,
+      targetUrl: 'https://blocked.example.com',
+      proxyUrl: '/api/proxy/web?url=blocked',
+      state: 'fetch-failed',
+      reasonCode: 'fetch-failed',
+      reason: '代理抓取网页失败',
+      previewMode: 'vnc',
+      previewableHtml: false,
+      fallbackToVnc: true
+    });
+    mockSubscribe.mockImplementation((_topic: string, handlers: Record<string, (...args: unknown[]) => void>) => {
+      handlers.onEvent?.({
+        eventType: 'BROWSER_URL_OPENED',
+        metadata: {
+          activeUrl: 'https://blocked.example.com',
+          previewMode: 'proxy'
+        }
+      });
+      handlers.onResult?.({
+        result: 'assistant result',
+        sessionId: 's-1'
+      });
+    });
+
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Type a message, Ctrl/⌘+Enter to send'), 'open blocked');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'VNC' })).toHaveClass('active');
+    });
+    expect(screen.getByText('真实浏览器正在展示该网页')).toBeInTheDocument();
+    expect(screen.queryByText('fetch-failed')).not.toBeInTheDocument();
+  });
+
+  it('shows agent page snapshot in browser panel when web fetch returns html', async () => {
+    mockSubscribe.mockImplementation((_topic: string, handlers: Record<string, (...args: unknown[]) => void>) => {
+      handlers.onEvent?.({
+        eventType: 'TOOL_CALL_END',
+        agentName: 'WebFetchTool',
+        output: JSON.stringify({
+          url: 'https://example.com/page',
+          path: '/workspace/.openmanus/web/web-snapshot.txt',
+          preview: '<html><body><h1>Agent visible page</h1></body></html>'
+        })
+      });
+      handlers.onResult?.({
+        result: 'assistant result',
+        sessionId: 's-1'
+      });
+    });
+
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Type a message, Ctrl/⌘+Enter to send'), 'browse page');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    const snapshotFrame = await screen.findByTitle('snapshot-preview');
+    expect(snapshotFrame).toHaveAttribute('srcdoc', expect.stringContaining('Agent visible page'));
+    expect(screen.getByRole('button', { name: 'Snapshot' })).toHaveClass('active');
+  });
+
+  it('shows real browser workspace when openUrl reports vnc navigation', async () => {
+    mockSubscribe.mockImplementation((_topic: string, handlers: Record<string, (...args: unknown[]) => void>) => {
+      handlers.onEvent?.({
+        eventType: 'BROWSER_URL_OPENED',
+        metadata: {
+          activeUrl: 'https://visible.example.com',
+          previewMode: 'vnc',
+          sandboxVncUrl: 'https://vnc.local'
+        }
+      });
+      handlers.onResult?.({
+        result: 'assistant result',
+        sessionId: 's-1'
+      });
+    });
+
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Type a message, Ctrl/⌘+Enter to send'), 'open visible');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    const vncFrame = await screen.findByTitle('vnc-preview');
+    expect(vncFrame).toHaveAttribute('src', 'https://vnc.local');
+    expect(screen.getByRole('button', { name: 'VNC' })).toHaveClass('active');
+    expect(screen.queryByTitle('web-preview')).not.toBeInTheDocument();
+  });
+
+  it('falls back to monitoring events when websocket result is missed', async () => {
+    mockSubscribe.mockImplementation((_topic: string, handlers: Record<string, (...args: unknown[]) => void>) => {
+      handlers.onEvent?.({
+        eventType: 'TOOL_CALL_END',
+        agentName: 'Browser',
+        output: 'tool output content'
+      });
+    });
+    mockGetSessionEvents.mockResolvedValue([
+      {
+        eventType: 'AGENT_END',
+        output: 'result from monitoring fallback',
+        sessionId: 's-1'
+      }
+    ]);
+
+    render(<App />);
+    await userEvent.type(screen.getByPlaceholderText('Type a message, Ctrl/⌘+Enter to send'), 'hello fallback');
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('result from monitoring fallback')).toBeInTheDocument();
+    });
+    expect(mockGetSessionEvents).toHaveBeenCalledWith('s-1');
   });
 });
