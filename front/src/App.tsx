@@ -47,6 +47,8 @@ export default function App(): JSX.Element {
     }
   }, [state.connectionStatus]);
 
+  const connectionTone = state.connectionStatus;
+
   useEffect(() => {
     return () => {
       void disconnectSocket();
@@ -336,9 +338,15 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <header className="top-nav">
-        <div className="brand">OpenManus Frontend</div>
+        <div className="brand-block">
+          <div className="brand">OpenManus</div>
+          <div className="brand-meta">Agent workspace</div>
+        </div>
         <div className="nav-actions">
-          <span className="status-tag">{statusText}</span>
+          <span className={'status-tag status-' + connectionTone}>
+            <span className="status-light" aria-hidden="true" />
+            {statusText}
+          </span>
           <button className="btn secondary" onClick={() => void reconnect()}>
             Reconnect
           </button>
@@ -353,7 +361,9 @@ export default function App(): JSX.Element {
 
       <main className="workspace">
         <section className="panel chat-panel">
-          <div className="panel-title">Conversation</div>
+          <div className="panel-title">
+            <span>Conversation</span>
+          </div>
           <div className="messages">
             {state.messages.length === 0 ? <div className="empty">Type a prompt to start the conversation</div> : null}
             {state.messages.map((message) => (
@@ -463,7 +473,9 @@ export default function App(): JSX.Element {
         </section>
 
         <section className="panel browser-panel">
-          <div className="panel-title">Browser / Sandbox</div>
+          <div className="panel-title">
+            <span>Browser / Sandbox</span>
+          </div>
           <div className="browser-toolbar">
             <input
               value={state.currentUrl}
@@ -503,7 +515,10 @@ export default function App(): JSX.Element {
             ) : null}
           </div>
           <div className="panel-title with-action">
-            <span>{statusLabel(state.browserStatus, state.previewMode)}</span>
+            <span className={'browser-status status-' + browserStatusTone(state.browserStatus)}>
+              <span className="status-light" aria-hidden="true" />
+              {statusLabel(state.browserStatus, state.previewMode)}
+            </span>
             <span>
               {state.previewMode === 'vnc' && state.sandboxVncUrl
                 ? '真实浏览器正在展示该网页'
@@ -716,6 +731,31 @@ function statusLabel(status: BrowserStatus, previewMode: string): string {
     'open-external': 'Open External'
   };
   return `${labels[status]} · ${previewMode}`;
+}
+
+function browserStatusTone(status: BrowserStatus): 'idle' | 'connecting' | 'connected' | 'error' {
+  if (status === 'idle') {
+    return 'idle';
+  }
+  if (
+    status === 'blocked' ||
+    status === 'proxy-blocked' ||
+    status === 'fallback-to-vnc' ||
+    status === 'open-external'
+  ) {
+    return 'error';
+  }
+  if (
+    status === 'searching' ||
+    status === 'loading' ||
+    status === 'proxying' ||
+    status === 'opening-search-page' ||
+    status === 'opening-target-page' ||
+    status === 'auto-switch-vnc'
+  ) {
+    return 'connecting';
+  }
+  return 'connected';
 }
 
 function sleep(ms: number): Promise<void> {

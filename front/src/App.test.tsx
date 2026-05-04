@@ -80,7 +80,8 @@ describe('App', () => {
 
   it('renders main shell and panels', () => {
     render(<App />);
-    expect(screen.getByText('OpenManus Frontend')).toBeInTheDocument();
+    expect(screen.getByText('OpenManus')).toBeInTheDocument();
+    expect(screen.getByText('Agent workspace')).toBeInTheDocument();
     expect(screen.getByText('Conversation')).toBeInTheDocument();
     expect(screen.getByText('Tools')).toBeInTheDocument();
     expect(screen.getByText('Browser / Sandbox')).toBeInTheDocument();

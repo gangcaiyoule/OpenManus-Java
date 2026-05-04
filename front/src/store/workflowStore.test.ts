@@ -45,6 +45,43 @@ describe('workflowReducer', () => {
     expect(state.error).toBe('boom');
   });
 
+  it('surfaces key execution events in tool output panel', () => {
+    let state = workflowReducer(initialWorkflowState, {
+      type: 'HANDLE_EVENT',
+      payload: { eventType: 'AGENT_START', agentName: 'execution_coordinator', input: 'hello' }
+    });
+    state = workflowReducer(state, {
+      type: 'HANDLE_EVENT',
+      payload: { eventType: 'LLM_RESPONSE', agentName: 'llm', output: '{"content":"ok"}' }
+    });
+    state = workflowReducer(state, {
+      type: 'HANDLE_EVENT',
+      payload: {
+        eventType: 'TOOL_CALL_START',
+        agentName: 'search_web',
+        input: '{"query":"openai"}',
+        metadata: { toolName: 'search_web' }
+      }
+    });
+    state = workflowReducer(state, {
+      type: 'HANDLE_EVENT',
+      payload: {
+        eventType: 'TOOL_CALL_END',
+        agentName: 'search_web',
+        output: '搜索结果: openai',
+        metadata: { toolName: 'search_web' }
+      }
+    });
+
+    expect(state.toolOutputs.map((item) => item.type)).toEqual([
+      'search_web 结果',
+      'search_web 参数',
+      'AI Message',
+      '用户请求'
+    ]);
+    expect(state.toolOutputs[0].content).toContain('搜索结果');
+  });
+
   it('updates browser state from structured search events', () => {
     let state = workflowReducer(initialWorkflowState, {
       type: 'HANDLE_EVENT',

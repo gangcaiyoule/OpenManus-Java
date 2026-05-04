@@ -191,7 +191,10 @@ export function workflowReducer(state: WorkflowState, action: WorkflowAction): W
       const fallbackWebSnapshot = parseWebSnapshotOutput(outputAsString);
       const patch: Partial<WorkflowState> = {};
 
-      if (eventType === 'TOOL_CALL_END' && outputAsString.length > 0) {
+      const keyEventOutput = keyEventToolOutput(action.payload, eventType, outputAsString);
+      if (keyEventOutput !== null) {
+        nextOutputs.unshift(keyEventOutput);
+      } else if (eventType === 'TOOL_CALL_END' && outputAsString.length > 0) {
         nextOutputs.unshift({
           id: randomId(),
           type: action.payload.agent_name || action.payload.agentName || '工具',
@@ -309,6 +312,61 @@ function normalizePayloadOutput(output: unknown): string {
 
 function getEventType(event: ExecutionEventPayload): string {
   return event.event_type || event.eventType || '';
+}
+
+function keyEventToolOutput(event: ExecutionEventPayload,
+                            eventType: string,
+                            outputAsString: string): ToolOutput | null {
+  switch (eventType) {
+    case 'AGENT_START':
+      if (!event.input) {
+        return null;
+      }
+      return {
+        id: randomId(),
+        type: '用户请求',
+        content: normalizePayloadOutput(event.input),
+        time: formatTime()
+      };
+    case 'LLM_REQUEST':
+      return {
+        id: randomId(),
+        type: 'LLM Request',
+        content: outputAsString || normalizePayloadOutput(event.metadata),
+        time: formatTime()
+      };
+    case 'LLM_RESPONSE':
+      return {
+        id: randomId(),
+        type: 'AI Message',
+        content: outputAsString || normalizePayloadOutput(event.metadata),
+        time: formatTime()
+      };
+    case 'TOOL_CALL_START':
+      return {
+        id: randomId(),
+        type: `${toolNameOf(event)} 参数`,
+        content: normalizePayloadOutput(event.input || event.metadata),
+        time: formatTime()
+      };
+    case 'TOOL_CALL_END':
+      return {
+        id: randomId(),
+        type: `${toolNameOf(event)} 结果`,
+        content: outputAsString || normalizePayloadOutput(event.metadata),
+        time: formatTime()
+      };
+    default:
+      return null;
+  }
+}
+
+function toolNameOf(event: ExecutionEventPayload): string {
+  const metadataToolName = event.metadata?.toolName;
+  if (typeof metadataToolName === 'string' && metadataToolName.length > 0) {
+    return metadataToolName;
+  }
+  return event.agent_name || event.agentName || '工具';
 }
 
 function applyStructuredBrowserEvent(patch: Partial<WorkflowState>,

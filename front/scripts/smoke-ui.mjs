@@ -87,7 +87,7 @@ async function run() {
       throw new Error(`Page errors detected: ${pageErrors.join(' | ')}`);
     }
 
-    console.log('UI smoke test passed. Screenshot saved to frontend/artifacts/ui-smoke.png');
+    console.log('UI smoke test passed. Screenshot saved to front/artifacts/ui-smoke.png');
   } catch (error) {
     console.error('UI smoke test failed.');
     if (serverLogs.trim().length > 0) {

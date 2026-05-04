@@ -1,18 +1,19 @@
-# OpenManus Frontend (React + Vite)
+# OpenManus Front (React + Vite)
 
 ## Quick Start
 
 ```bash
-cd frontend
+cd front
 npm install
 npm run dev
 ```
 
-Default dev URL: `http://localhost:5173`
+Default backend URL: `http://localhost:8089`
+Internal Vite dev URL: `http://localhost:5173`
 
 ## Backend Dependency
 
-Start backend on `http://localhost:8089` first.
+Starting the Spring Boot web application also starts this Vite frontend.
 
 Vite proxy is preconfigured:
 - `/api` -> `http://localhost:8089`

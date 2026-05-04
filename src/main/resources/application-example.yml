@@ -86,19 +86,6 @@ openmanus:
     # 读取到损坏 JSON 时是否先隔离到 corrupted/ 目录
     # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_QUARANTINE_CORRUPTED_FILES 覆盖
     quarantine-corrupted-files: true
-    # 是否启用工具结果压缩；默认 false 保持完整消息传递
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_TOOL_RESULTS_ENABLED 覆盖
-    compact-tool-results-enabled: false
-    # 工具结果写入长期 memory 的最大字符数
-    # 仅在 compact-tool-results-enabled=true 时生效
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_MAX_CHARS 覆盖
-    tool-result-max-chars: 4000
-    # 工具结果压缩时保留的前缀长度
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_HEAD_CHARS 覆盖
-    compact-tool-result-head-chars: 300
-    # 工具结果压缩时保留的后缀长度
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_COMPACT_TAIL_CHARS 覆盖
-    compact-tool-result-tail-chars: 200
     # 每轮发送给模型的历史消息上限，0 表示不限制（默认）
     # 配置为负值会自动回退为 0（不限制）
     # 仅影响模型输入窗口，不影响 ChatMemory 持久化全量历史
@@ -128,33 +115,21 @@ openmanus:
     # 0 表示关闭保护（默认）
     # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_REACT_REPEATED_TOOL_CALL_THRESHOLD 覆盖
     react-repeated-tool-call-threshold: 0
-    # 是否启用超大工具结果的无损卸载（写入 artifact 文件，memory 中保留索引卡片）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_ENABLED 覆盖
-    tool-result-offload-enabled: true
-    # 触发卸载的最小字符数（<=0 会回退为默认值）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_MIN_CHARS 覆盖
-    tool-result-offload-min-chars: 12000
-    # 卸载卡片中保留的前缀字符数（用于快速感知结果语义）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_HEAD_CHARS 覆盖
-    tool-result-offload-head-chars: 240
-    # 卸载卡片中保留的后缀字符数（用于保留结尾关键信息）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_TAIL_CHARS 覆盖
-    tool-result-offload-tail-chars: 160
-    # 工具结果 artifact 存储目录
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_STORE_DIR 覆盖
-    tool-result-artifact-store-dir: "/tmp/openmanus/tool-result-artifacts"
-    # 每个会话保留的 artifact 索引条目上限（超过会自动裁剪，防止长会话索引无限膨胀）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY 覆盖
-    tool-result-artifact-max-index-entries-per-memory: 20000
-    # 是否在模型输入阶段按需回填已卸载的工具结果
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_ENABLED 覆盖
-    tool-result-rehydrate-enabled: true
-    # 每条回填工具结果的最大字符数
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_CHARS 覆盖
-    tool-result-rehydrate-max-chars: 8000
-    # 每轮最多回填多少条工具结果（默认 2，0 表示不限制）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND 覆盖
-    tool-result-rehydrate-max-per-round: 2
+    # 是否在每轮模型 API 前把超大工具结果写入用户沙盒文件，并用 preview stub 替换
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_ENABLED 覆盖
+    tool-result-budget-enabled: true
+    # 触发预算落盘的最小字符数（<=0 会回退为默认值）
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_MIN_CHARS 覆盖
+    tool-result-budget-min-chars: 12000
+    # stub 中保留的前缀字符数
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS 覆盖
+    tool-result-budget-preview-head-chars: 240
+    # stub 中保留的后缀字符数
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS 覆盖
+    tool-result-budget-preview-tail-chars: 160
+    # 上下文腐烂阈值；0 表示关闭该触发条件
+    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_DECAY_CHARS 覆盖
+    tool-result-budget-decay-chars: 0
 
   mcp:
     # 是否允许 MCP 工具进入当前 Agent 工具链
@@ -176,13 +151,6 @@ spring:
   application:
     name: openmanus-java-web
   
-  # Web-related configuration
-  web:
-    resources:
-      static-locations: classpath:/static/
-      cache:
-        period: 0 # Don't cache static resources in development environment
-
   # JSON configuration
   jackson:
     date-format: "yyyy-MM-dd HH:mm:ss"
@@ -225,4 +193,4 @@ logging:
   level:
     com.openmanus.java: INFO
     root: INFO
-    org.springframework.web: DEBUG
+    org.springframework.web: INFO

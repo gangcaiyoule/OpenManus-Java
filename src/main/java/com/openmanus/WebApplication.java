@@ -24,21 +24,24 @@ public class WebApplication {
 
     private static final Logger logger = LoggerFactory.getLogger(WebApplication.class);
     private static final String STARTING_LOG = "Starting OpenManus-Java";
-    private static final String STARTED_LOG = "OpenManus-Java started successfully";
 
     public static void main(String[] args) {
         logger.info(STARTING_LOG);
         DotenvLoader.loadFromWorkingDirectory();
         SpringApplication application = new SpringApplication(WebApplication.class);
-        application.setDefaultProperties(Map.of("server.port", "8089"));
+        application.setDefaultProperties(Map.of(
+                "server.port", "8089",
+                "logging.level.org.springframework.web", "INFO",
+                "logging.level.org.springframework.messaging", "INFO",
+                "logging.level.org.springframework.web.socket", "INFO",
+                "logging.level.org.springframework.web.socket.config.WebSocketMessageBrokerStats", "WARN"
+        ));
         application.run(args);
-        logger.info(STARTED_LOG);
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
-        logger.info(STARTING_LOG);
-        logger.info(STARTED_LOG);
+        logger.info("OpenManus-Java started successfully on port 8089");
     }
 
     /**
