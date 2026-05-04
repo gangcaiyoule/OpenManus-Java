@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,6 +41,7 @@ class WebFetchToolSmokeTest implements SmokeTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String TEST_SESSION_ID = "test-session";
+    private static final String TEST_USER_ID = "001";
 
     @TempDir
     Path tempDir;
@@ -54,6 +56,7 @@ class WebFetchToolSmokeTest implements SmokeTest {
     @BeforeEach
     void setUp() throws Exception {
         MDC.put("sessionId", TEST_SESSION_ID);
+        MDC.put("userId", TEST_USER_ID);
         try {
             startTestServer();
         } catch (SocketException exception) {
@@ -63,8 +66,8 @@ class WebFetchToolSmokeTest implements SmokeTest {
         mockProxyConfig = mock(AiProxyConfig.class);
         mockExecutionEventPort = mock(ExecutionEventPort.class);
         when(mockProxyConfig.enabled()).thenReturn(false);
-        when(mockGateway.getOrCreateSandbox(TEST_SESSION_ID)).thenReturn(new AiSessionSandboxInfo(
-                TEST_SESSION_ID, null, tempDir.toString(), "https://vnc.local", null, "RUNNING"
+        when(mockGateway.getOrCreateSandbox(TEST_USER_ID)).thenReturn(new AiSessionSandboxInfo(
+                TEST_USER_ID, null, tempDir.toString(), "https://vnc.local", null, "RUNNING"
         ));
         when(mockGateway.getWorkspaceRoot(anyString())).thenReturn(tempDir.toString());
         doAnswer(invocation -> {
@@ -74,7 +77,7 @@ class WebFetchToolSmokeTest implements SmokeTest {
             Files.createDirectories(target.getParent());
             Files.writeString(target, content, StandardCharsets.UTF_8);
             return null;
-        }).when(mockGateway).writeTextFile(eq(TEST_SESSION_ID), anyString(), anyString());
+        }).when(mockGateway).writeTextFile(eq(TEST_USER_ID), anyString(), anyString());
         webFetchTool = new WebFetchTool(mockGateway, mockProxyConfig, mockExecutionEventPort);
     }
 
@@ -87,18 +90,25 @@ class WebFetchToolSmokeTest implements SmokeTest {
     }
 
     @Test
-    @DisplayName("browseWeb should snapshot to sandbox path and return url/path/preview")
-    void browseWeb_snapshots() throws Exception {
+    @DisplayName("browseWeb should return raw content without web snapshot")
+    void browseWeb_returnsRawContent() throws Exception {
         String result = webFetchTool.browseWeb(testServerBaseUrl + "/page");
         JsonNode node = MAPPER.readTree(result);
         assertThat(node.get("url").asText()).contains("/page");
-        Path snapshotPath = Path.of(node.get("path").asText());
-        assertThat(Files.exists(snapshotPath)).isTrue();
-        assertThat(node.get("preview").asText()).contains("Local Web Smoke Page");
-        verify(mockGateway).openBrowserUrl(eq(TEST_SESSION_ID), eq(testServerBaseUrl + "/page"));
+        assertThat(node.get("contentType").asText()).contains("text/html");
+        assertThat(node.get("originalChars").asInt()).isGreaterThan(0);
+        assertThat(node.get("body").asText()).contains("Local Web Smoke Page");
+        assertThat(node.has("path")).isFalse();
+        assertThat(node.has("preview")).isFalse();
+        assertThat(node.has("snapshot" + "Path")).isFalse();
+        assertThat(node.has("snapshot" + "Preview")).isFalse();
+        assertThat(Files.exists(tempDir.resolve(".openmanus").resolve("web"))).isFalse();
+        verify(mockGateway).openBrowserUrl(eq(TEST_USER_ID), eq(testServerBaseUrl + "/page"));
+        verify(mockGateway, never()).writeTextFile(eq(TEST_USER_ID), anyString(), anyString());
         verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("BROWSER_URL_OPENED")));
         verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("WEB_FETCH_STARTED")));
-        verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("WEB_FETCH_SNAPSHOT_READY")));
+        verify(mockExecutionEventPort, never()).recordCustomEvent(argThat(event ->
+                event.getEventType().name().equals("WEB_FETCH_" + "SNAPSHOT_READY")));
     }
 
     private void startTestServer() throws Exception {

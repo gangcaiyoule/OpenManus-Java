@@ -25,8 +25,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import static com.openmanus.aiframework.runtime.AiLogMarkers.TO_FRONTEND;
-
 /**
  * Search tool - 专注搜索（BrowserTool 仅做浏览器操纵）。
  */
@@ -38,9 +36,9 @@ public class SearchTool {
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_TIMEOUT_MS = DEFAULT_TIMEOUT_SECONDS * 1000;
     private static final int MAX_SEARCH_RESULTS = 5;
-    private static final int MAX_RESULT_LENGTH = 8000;
     private static final int MAX_RETRIES = 3;
     private static final int HTTP_OK = 200;
+    private static final String DEFAULT_USER_ID = "001";
 
     private final AiSearchConfig searchConfig;
     private final ExecutionEventPort executionEventPort;
@@ -80,10 +78,6 @@ public class SearchTool {
                     log.info("搜索重试第 {} 次: {}", retryCount, query);
                     Thread.sleep(1000L * retryCount);
                 }
-
-                log.info(TO_FRONTEND, "│  🔍 SEARCH · 搜索模块");
-                log.info(TO_FRONTEND, "│  📝 关键词: {}", query);
-
                 String apiKey = searchConfig == null ? null : searchConfig.apiKey();
                 if (apiKey == null || apiKey.isEmpty() || apiKey.startsWith("your-")) {
                     return fallbackSearch(query, encodedQuery, displayUrl);
@@ -131,7 +125,7 @@ public class SearchTool {
 
     private String parseSerperResults(String jsonResponse, String query, String displayUrl) {
         StringBuilder results = new StringBuilder();
-        results.append("🔍 搜索结果: ").append(query).append("\n\n");
+        results.append("搜索结果: ").append(query).append("\n\n");
         List<Map<String, Object>> resultItems = new ArrayList<>();
 
         try {
@@ -152,9 +146,9 @@ public class SearchTool {
                         count++;
                         resultItems.add(resultItem(count, title, link, snippet));
                         results.append(count).append(". **").append(title).append("**\n");
-                        results.append("   🔗 ").append(link).append("\n");
+                        results.append("   Link: ").append(link).append("\n");
                         if (!snippet.isEmpty()) {
-                            results.append("   📝 ").append(trimTo(snippet, MAX_RESULT_LENGTH)).append("\n");
+                            results.append("   Snippet: ").append(snippet).append("\n");
                         }
                         results.append("\n");
                     }
@@ -173,7 +167,7 @@ public class SearchTool {
             );
         } catch (Exception e) {
             results.append("搜索结果解析失败: ").append(e.getMessage()).append("\n");
-            results.append("原始响应: ").append(trimTo(jsonResponse, MAX_RESULT_LENGTH)).append("\n");
+            results.append("原始响应: ").append(jsonResponse == null ? "" : jsonResponse).append("\n");
         }
 
         return results.toString();
@@ -187,7 +181,7 @@ public class SearchTool {
                 metadata(query, displayUrl, null, "web", List.of(), "SERPER_API_NOT_CONFIGURED", "搜索 API 未配置")
         );
         return """
-                🔍 搜索结果: %s
+                搜索结果: %s
 
                 搜索 API 未配置（Serper API Key 为空或为占位符）。
                 可在配置中设置：
@@ -200,13 +194,18 @@ public class SearchTool {
     }
 
     private AiSessionSandboxInfo openSearchPageInRealBrowser(String displayUrl) {
-        String sessionId = MDC.get("sessionId");
-        if (sessionId == null || sessionId.isBlank() || sessionSandboxGateway == null) {
+        if (sessionSandboxGateway == null) {
             return null;
         }
-        AiSessionSandboxInfo sandboxInfo = sessionSandboxGateway.getOrCreateSandbox(sessionId);
-        sessionSandboxGateway.openBrowserUrl(sessionId, displayUrl);
+        String sandboxKey = currentSandboxKey();
+        AiSessionSandboxInfo sandboxInfo = sessionSandboxGateway.getOrCreateSandbox(sandboxKey);
+        sessionSandboxGateway.openBrowserUrl(sandboxKey, displayUrl);
         return sandboxInfo;
+    }
+
+    private static String currentSandboxKey() {
+        String userId = MDC.get("userId");
+        return userId == null || userId.isBlank() ? DEFAULT_USER_ID : userId;
     }
 
     private static Map<String, Object> metadata(String query,
@@ -252,18 +251,8 @@ public class SearchTool {
         item.put("rank", rank);
         item.put("title", title);
         item.put("url", url);
-        item.put("snippet", snippet == null ? "" : trimTo(snippet, MAX_RESULT_LENGTH));
+        item.put("snippet", snippet == null ? "" : snippet);
         return item;
-    }
-
-    private static String trimTo(String text, int maxChars) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() <= maxChars) {
-            return text;
-        }
-        return text.substring(0, maxChars) + "\n... (结果已截断)";
     }
 
     private static String readContent(HttpURLConnection connection) throws IOException {

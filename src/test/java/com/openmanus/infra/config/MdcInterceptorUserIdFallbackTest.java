@@ -31,4 +31,12 @@ class MdcInterceptorUserIdFallbackTest {
 
         assertThat(sessionId).isEqualTo("001");
     }
+
+    @Test
+    @DisplayName("normalizeUserId should default to 001 when user id is missing")
+    void normalizeUserId_defaultsToConfiguredUserId() {
+        String userId = MdcInterceptor.normalizeUserId(null, "001");
+
+        assertThat(userId).isEqualTo("001");
+    }
 }

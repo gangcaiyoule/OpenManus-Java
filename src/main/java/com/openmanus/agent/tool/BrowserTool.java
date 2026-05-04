@@ -15,8 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
-import static com.openmanus.aiframework.runtime.AiLogMarkers.TO_FRONTEND;
-
 /**
  * Browser tool - focuses on操纵浏览器/沙箱（而不是搜索/抓取）。
  *
@@ -28,6 +26,7 @@ import static com.openmanus.aiframework.runtime.AiLogMarkers.TO_FRONTEND;
 public class BrowserTool {
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final String DEFAULT_USER_ID = "001";
 
     private final AiSessionSandboxGateway sessionSandboxGateway;
     private final ExecutionEventPort executionEventPort;
@@ -44,14 +43,11 @@ public class BrowserTool {
             return jsonError("invalid url");
         }
 
-        log.info(TO_FRONTEND, "│  🌐 BROWSER · 浏览器操纵模块");
-        log.info(TO_FRONTEND, "│  📄 正在访问: {}", normalized);
-
-        String sessionId = MDC.get("sessionId");
+        String sandboxKey = currentSandboxKey();
         AiSessionSandboxInfo sandboxInfo = null;
-        if (sessionId != null && !sessionId.isBlank() && sessionSandboxGateway != null) {
-            sandboxInfo = sessionSandboxGateway.getOrCreateSandbox(sessionId);
-            sessionSandboxGateway.openBrowserUrl(sessionId, normalized);
+        if (sessionSandboxGateway != null) {
+            sandboxInfo = sessionSandboxGateway.getOrCreateSandbox(sandboxKey);
+            sessionSandboxGateway.openBrowserUrl(sandboxKey, normalized);
         }
 
         WebSearchEventSupport.emit(
@@ -70,24 +66,15 @@ public class BrowserTool {
 
     @AiTool(value = "确保 VNC 沙箱就绪并返回 VNC URL（如可用）", name = "browser_ensure_sandbox")
     public String ensureSandbox() {
-        String sessionId = MDC.get("sessionId");
-        if (sessionId == null || sessionId.isBlank()) {
-            return jsonError("missing sessionId");
-        }
+        String sandboxKey = currentSandboxKey();
         if (sessionSandboxGateway == null) {
             return jsonError("sandbox gateway not configured");
         }
 
         try {
-            AiSessionSandboxInfo info = sessionSandboxGateway.getSandboxInfo(sessionId).orElse(null);
+            AiSessionSandboxInfo info = sessionSandboxGateway.getSandboxInfo(sandboxKey).orElse(null);
             if (info == null || !info.isAvailable()) {
-                log.info(TO_FRONTEND, "┌──────────────────────────────────────────────────────────┐");
-                log.info(TO_FRONTEND, "│  🖥️ SANDBOX · 可视化沙箱环境                            │");
-                log.info(TO_FRONTEND, "├──────────────────────────────────────────────────────────┤");
-                log.info(TO_FRONTEND, "│  ⚡ 正在初始化安全沙箱环境...                              │");
-                log.info(TO_FRONTEND, "└──────────────────────────────────────────────────────────┘");
-                info = sessionSandboxGateway.getOrCreateSandbox(sessionId);
-                log.info(TO_FRONTEND, "│  ✅ 沙箱已就绪 · VNC 可视化界面已开放                        │");
+                info = sessionSandboxGateway.getOrCreateSandbox(sandboxKey);
             }
 
             WebSearchEventSupport.emit(
@@ -98,7 +85,7 @@ public class BrowserTool {
             );
 
             ObjectNode root = OBJECT_MAPPER.createObjectNode();
-            root.put("sessionId", sessionId);
+            root.put("userId", sandboxKey);
             root.put("sandboxAvailable", info != null && info.isAvailable());
             root.put("sandboxStatus", info == null ? "" : safeText(info.status()));
             root.put("sandboxVncUrl", info == null ? "" : safeText(info.vncUrl()));
@@ -131,6 +118,11 @@ public class BrowserTool {
         ObjectNode root = OBJECT_MAPPER.createObjectNode();
         root.put("error", message == null ? "" : message);
         return root.toString();
+    }
+
+    private static String currentSandboxKey() {
+        String userId = MDC.get("userId");
+        return userId == null || userId.isBlank() ? DEFAULT_USER_ID : userId;
     }
 
     private static Map<String, Object> metadata(String activeUrl,

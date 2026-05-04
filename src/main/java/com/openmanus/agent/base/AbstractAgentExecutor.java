@@ -1,18 +1,17 @@
 package com.openmanus.agent.base;
 
+import com.openmanus.agent.context.ToolResultBudget;
 import com.openmanus.agent.context.assembly.ContextAssembler;
 import com.openmanus.agent.context.assembly.ContextBudgetPolicy;
 import com.openmanus.agent.context.assembly.ContextSnapshot;
 import com.openmanus.agent.context.assembly.TaskExecutionState;
 import com.openmanus.agent.context.assembly.TaskExecutionStateTracker;
-import com.openmanus.agent.context.compression.IndexedRehydrateSelector;
 import com.openmanus.agent.context.token.ModelContextTokenCounter;
 import com.openmanus.aiframework.runtime.AiChatModel;
 import com.openmanus.aiframework.runtime.AiMemory;
 import com.openmanus.aiframework.runtime.AiMemoryProvider;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
 import com.openmanus.aiframework.runtime.AiSystemMessageMemory;
-import com.openmanus.aiframework.runtime.AiToolResultArtifactStore;
-import com.openmanus.aiframework.runtime.ToolResultArtifactRef;
 import com.openmanus.aiframework.runtime.model.AiChatMessage;
 import com.openmanus.aiframework.runtime.model.AiChatRequest;
 import com.openmanus.aiframework.runtime.model.AiChatResponse;
@@ -21,13 +20,9 @@ import com.openmanus.aiframework.runtime.model.AiToolSpec;
 import com.openmanus.aiframework.tool.AiRegisteredTool;
 import com.openmanus.aiframework.tool.AiToolExecutionRequest;
 import com.openmanus.aiframework.tool.AiToolRegistry;
+import com.openmanus.domain.model.AgentExecutionEvent;
 import com.openmanus.domain.service.ExecutionEventPort;
 import lombok.extern.slf4j.Slf4j;
-
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import static com.openmanus.aiframework.runtime.AiLogMarkers.TO_FRONTEND;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -54,10 +49,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         AiChatModel aiChatModel;
         String systemMessage;
         AiMemoryProvider aiMemoryProvider;
-        boolean enableToolResultCompaction = false;
-        int memoryToolResultMaxChars = 4000;
-        int compactToolResultHeadChars = 300;
-        int compactToolResultTailChars = 200;
         int modelContextMaxMessages = 0;
         int modelContextMaxTotalMessages = 0;
         int modelContextMaxApproxTokens = 0;
@@ -71,14 +62,12 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         int taskStateLastFailureMaxChars = TaskExecutionState.Budget.DEFAULT_LAST_FAILURE_MAX_CHARS;
         int taskStateTodoMaxItems = TaskExecutionState.Budget.DEFAULT_TODO_MAX_ITEMS;
         int taskStateTodoItemMaxChars = TaskExecutionState.Budget.DEFAULT_TODO_ITEM_MAX_CHARS;
-        boolean enableToolResultOffload = false;
-        int toolResultOffloadMinChars = 12000;
-        int toolResultOffloadHeadChars = 240;
-        int toolResultOffloadTailChars = 160;
-        boolean enableToolResultRehydrate = false;
-        int toolResultRehydrateMaxChars = 8000;
-        int toolResultRehydrateMaxPerRound = 0;
-        AiToolResultArtifactStore toolResultArtifactStore;
+        AiSessionSandboxGateway sessionSandboxGateway;
+        boolean toolResultBudgetEnabled = true;
+        int toolResultBudgetMinChars = 12000;
+        int toolResultBudgetPreviewHeadChars = 240;
+        int toolResultBudgetPreviewTailChars = 160;
+        int toolResultBudgetDecayChars = 0;
         ExecutionEventPort executionEventPort;
         final Map<String, AiRegisteredTool> tools = new HashMap<>();
 
@@ -103,40 +92,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
          */
         public B aiMemoryProvider(AiMemoryProvider aiMemoryProvider) {
             this.aiMemoryProvider = aiMemoryProvider;
-            return result();
-        }
-
-        /**
-         * Enables or disables long tool-result compaction before persisting into memory.
-         * Disabled by default to preserve full message continuity across turns.
-         */
-        public B enableToolResultCompaction(boolean enabled) {
-            this.enableToolResultCompaction = enabled;
-            return result();
-        }
-
-        /**
-         * Sets max chars for tool results persisted into chat memory.
-         * Large outputs are compacted to reduce long-conversation context bloat.
-         */
-        public B memoryToolResultMaxChars(int maxChars) {
-            this.memoryToolResultMaxChars = Math.max(256, maxChars);
-            return result();
-        }
-
-        /**
-         * Sets how many leading chars to keep when compacting large tool results in chat memory.
-         */
-        public B compactToolResultHeadChars(int headChars) {
-            this.compactToolResultHeadChars = Math.max(64, headChars);
-            return result();
-        }
-
-        /**
-         * Sets how many trailing chars to keep when compacting large tool results in chat memory.
-         */
-        public B compactToolResultTailChars(int tailChars) {
-            this.compactToolResultTailChars = Math.max(32, tailChars);
             return result();
         }
 
@@ -246,69 +201,33 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             return result();
         }
 
-        /**
-         * Enables lossless offloading for very large tool results.
-         * When enabled, oversized outputs are persisted into artifact store and memory keeps a compact index card.
-         */
-        public B enableToolResultOffload(boolean enabled) {
-            this.enableToolResultOffload = enabled;
+        public B sessionSandboxGateway(AiSessionSandboxGateway sessionSandboxGateway) {
+            this.sessionSandboxGateway = sessionSandboxGateway;
             return result();
         }
 
-        /**
-         * Minimum chars to trigger lossless tool-result offloading.
-         */
-        public B toolResultOffloadMinChars(int minChars) {
-            this.toolResultOffloadMinChars = Math.max(256, minChars);
+        public B enableToolResultBudget(boolean enabled) {
+            this.toolResultBudgetEnabled = enabled;
             return result();
         }
 
-        /**
-         * Sets leading preview chars for offloaded tool-result index card.
-         */
-        public B toolResultOffloadHeadChars(int headChars) {
-            this.toolResultOffloadHeadChars = Math.max(64, headChars);
+        public B toolResultBudgetMinChars(int minChars) {
+            this.toolResultBudgetMinChars = Math.max(256, minChars);
             return result();
         }
 
-        /**
-         * Sets trailing preview chars for offloaded tool-result index card.
-         */
-        public B toolResultOffloadTailChars(int tailChars) {
-            this.toolResultOffloadTailChars = Math.max(32, tailChars);
+        public B toolResultBudgetPreviewHeadChars(int headChars) {
+            this.toolResultBudgetPreviewHeadChars = Math.max(64, headChars);
             return result();
         }
 
-        /**
-         * Enables rehydrating offloaded tool-result artifacts back into model input.
-         */
-        public B enableToolResultRehydrate(boolean enabled) {
-            this.enableToolResultRehydrate = enabled;
+        public B toolResultBudgetPreviewTailChars(int tailChars) {
+            this.toolResultBudgetPreviewTailChars = Math.max(32, tailChars);
             return result();
         }
 
-        /**
-         * Max chars allowed for each rehydrated tool result.
-         */
-        public B toolResultRehydrateMaxChars(int maxChars) {
-            this.toolResultRehydrateMaxChars = Math.max(256, maxChars);
-            return result();
-        }
-
-        /**
-         * Max count of tool-result artifacts rehydrated per model round.
-         * 0 means unlimited.
-         */
-        public B toolResultRehydrateMaxPerRound(int maxCount) {
-            this.toolResultRehydrateMaxPerRound = Math.max(0, maxCount);
-            return result();
-        }
-
-        /**
-         * Artifact store used by tool-result offloading.
-         */
-        public B toolResultArtifactStore(AiToolResultArtifactStore store) {
-            this.toolResultArtifactStore = store;
+        public B toolResultBudgetDecayChars(int decayChars) {
+            this.toolResultBudgetDecayChars = Math.max(0, decayChars);
             return result();
         }
 
@@ -364,10 +283,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
     private final AiChatModel aiChatModel;
     private final String systemMessage;
     private final AiMemoryProvider aiMemoryProvider;
-    private final boolean enableToolResultCompaction;
-    private final int memoryToolResultMaxChars;
-    private final int compactToolResultHeadChars;
-    private final int compactToolResultTailChars;
     private final int modelContextMaxMessages;
     private final int modelContextMaxTotalMessages;
     private final int modelContextMaxApproxTokens;
@@ -377,24 +292,14 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
     private final int maxExecutionSeconds;
     private final int repeatedToolCallThreshold;
     private final TaskExecutionState.Budget taskStateBudget;
-    private final boolean enableToolResultOffload;
-    private final int toolResultOffloadMinChars;
-    private final int toolResultOffloadHeadChars;
-    private final int toolResultOffloadTailChars;
-    private final boolean enableToolResultRehydrate;
-    private final int toolResultRehydrateMaxChars;
-    private final int toolResultRehydrateMaxPerRound;
-    private final AiToolResultArtifactStore toolResultArtifactStore;
+    private final ToolResultBudget toolResultBudget;
     private final ExecutionEventPort executionEventPort;
     private final ContextBudgetPolicy contextBudgetPolicy;
     private final ContextAssembler contextAssembler;
     private final Map<String, AiRegisteredTool> tools;
     private final List<AiToolSpec> toolSpecifications;
     private static final int SYSTEM_MESSAGE_LOCK_STRIPES = 1024;
-    private static final int LOOP_CONTINUITY_MIN_PREVIEW_CHARS = 128;
     private static final int MAX_CONSECUTIVE_UNKNOWN_TOOL_CALLS = 3;
-    private static final int INDEXED_REHYDRATE_FETCH_LIMIT_MIN = 8;
-    private static final int INDEXED_REHYDRATE_FETCH_LIMIT_MAX = 128;
     private static final ReentrantLock[] SYSTEM_MESSAGE_LOCKS = createSystemMessageLocks();
 
     public AbstractAgentExecutor( Builder<B> builder ) {
@@ -402,10 +307,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         this.aiChatModel = resolveAiChatModel(builder);
         this.systemMessage = builder.systemMessage;
         this.aiMemoryProvider = builder.aiMemoryProvider;
-        this.enableToolResultCompaction = builder.enableToolResultCompaction;
-        this.memoryToolResultMaxChars = builder.memoryToolResultMaxChars;
-        this.compactToolResultHeadChars = builder.compactToolResultHeadChars;
-        this.compactToolResultTailChars = builder.compactToolResultTailChars;
         this.modelContextMaxMessages = builder.modelContextMaxMessages;
         this.modelContextMaxTotalMessages = builder.modelContextMaxTotalMessages;
         this.modelContextMaxApproxTokens = builder.modelContextMaxApproxTokens;
@@ -424,14 +325,14 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 builder.taskStateTodoMaxItems,
                 builder.taskStateTodoItemMaxChars
         );
-        this.enableToolResultOffload = builder.enableToolResultOffload;
-        this.toolResultOffloadMinChars = builder.toolResultOffloadMinChars;
-        this.toolResultOffloadHeadChars = builder.toolResultOffloadHeadChars;
-        this.toolResultOffloadTailChars = builder.toolResultOffloadTailChars;
-        this.enableToolResultRehydrate = builder.enableToolResultRehydrate;
-        this.toolResultRehydrateMaxChars = builder.toolResultRehydrateMaxChars;
-        this.toolResultRehydrateMaxPerRound = builder.toolResultRehydrateMaxPerRound;
-        this.toolResultArtifactStore = builder.toolResultArtifactStore;
+        this.toolResultBudget = new ToolResultBudget(
+                builder.sessionSandboxGateway,
+                builder.toolResultBudgetEnabled,
+                builder.toolResultBudgetMinChars,
+                builder.toolResultBudgetPreviewHeadChars,
+                builder.toolResultBudgetPreviewTailChars,
+                builder.toolResultBudgetDecayChars
+        );
         this.executionEventPort = builder.executionEventPort;
         this.contextBudgetPolicy = new ContextBudgetPolicy(
                 this.modelContextMaxMessages,
@@ -443,20 +344,8 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 )
         );
         this.contextAssembler = new ContextAssembler(this.contextBudgetPolicy, this.taskStateBudget);
-        validateToolResultStoreConfiguration();
         this.tools = Collections.unmodifiableMap(new HashMap<>(builder.tools));
         this.toolSpecifications = AiToolRegistry.toRuntimeToolSpecifications(this.tools.values());
-    }
-
-    private void validateToolResultStoreConfiguration() {
-        if (enableToolResultOffload && toolResultArtifactStore == null) {
-            throw new IllegalStateException(
-                    "toolResultArtifactStore must be configured when toolResultOffload is enabled");
-        }
-        if (enableToolResultRehydrate && toolResultArtifactStore == null) {
-            throw new IllegalStateException(
-                    "toolResultArtifactStore must be configured when toolResultRehydrate is enabled");
-        }
     }
 
     private AiChatModel resolveAiChatModel(Builder<B> builder) {
@@ -481,8 +370,9 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         if (userInput == null || userInput.isBlank()) {
             throw new IllegalArgumentException("userInput cannot be null or blank");
         }
-        log.info("Starting agent execution with input length: {}", userInput.length());
-        log.info("MemoryId: {}", memoryId != null ? memoryId.toString() : "null");
+        log.debug("agent_execution_start inputLength={} memoryId={}",
+                userInput.length(),
+                memoryId != null ? memoryId.toString() : "null");
 
         AiMemory memory = resolveMemory(memoryId);
 
@@ -497,13 +387,14 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 ensureSystemMessageInMemory(memory, memoryId, runtimeSystemMessage);
             }
         }
-        log.info("Context prepared from chat memory: memoryId={}, messageCount={}", memoryId, messageList.size());
+        log.debug("context_prepared memoryId={} messageCount={}", memoryId, messageList.size());
 
         AiChatMessage userMessage = extractUserMessageFromInput(userInput);
         messageList.appendAndPersist(userMessage, memory);
 
         long startNs = System.nanoTime();
         TaskExecutionState taskExecutionState = TaskExecutionState.empty(taskStateBudget);
+        List<AiChatMessage> pendingToolResults = new ArrayList<>();
         String lastToolBatchFingerprint = null;
         int repeatedToolBatchCount = 0;
         String lastUnknownToolFingerprint = null;
@@ -518,24 +409,20 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                     throw new RuntimeException("Agent exceeded maximum execution seconds (" + maxExecutionSeconds + ")");
                 }
             }
-            log.info("Agent Iteration #{}", i + 1);
+            log.debug("agent_iteration iteration={}", i + 1);
 
             publishIterationEvent(memoryId, i + 1, taskExecutionState);
+            flushPendingToolResults(messageList, pendingToolResults, memory);
 
             List<AiChatMessage> modelMessagesBeforeBudget = buildModelMessages(
                     messageList.messages(),
                     userMessage,
                     taskExecutionState
             );
-            List<AiChatMessage> modelMessagesAfterFirstBudget = applyApproxTokenBudget(modelMessagesBeforeBudget, userMessage);
-            List<AiChatMessage> modelMessagesAfterIndexedRehydrate =
-                    maybeInjectIndexedRehydration(modelMessagesAfterFirstBudget, userMessage, memoryId);
-            List<AiChatMessage> modelMessages = applyApproxTokenBudget(modelMessagesAfterIndexedRehydrate, userMessage);
+            List<AiChatMessage> modelMessages = applyApproxTokenBudget(modelMessagesBeforeBudget, userMessage);
             logContextGovernance(
                     i + 1,
                     modelMessagesBeforeBudget,
-                    modelMessagesAfterFirstBudget,
-                    modelMessagesAfterIndexedRehydrate,
                     modelMessages
             );
             AiChatRequest runtimeRequest = new AiChatRequest(
@@ -547,6 +434,20 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                     null,
                     null
             );
+            publishKeyEvent(
+                    memoryId,
+                    AgentExecutionEvent.EventType.LLM_REQUEST,
+                    "llm",
+                    "AI_MODEL",
+                    "RUNNING",
+                    null,
+                    Map.of(
+                            "iteration", i + 1,
+                            "messageCount", modelMessages.size(),
+                            "toolCount", toolSpecifications.size()
+                    ),
+                    modelRequestSummary(modelMessages)
+            );
             AiChatResponse runtimeResponse = aiChatModel.chat(runtimeRequest);
             if (runtimeResponse == null || runtimeResponse.message() == null) {
                 throw new RuntimeException("LLM failed to generate a response.");
@@ -554,6 +455,16 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
 
             AiChatMessage assistantMessage = normalizeAssistantToolCallIds(runtimeResponse.message());
             messageList.appendAndPersist(assistantMessage, memory);
+            publishKeyEvent(
+                    memoryId,
+                    AgentExecutionEvent.EventType.LLM_RESPONSE,
+                    "llm",
+                    "AI_MESSAGE",
+                    "SUCCESS",
+                    null,
+                    llmResponseMetadata(i + 1, runtimeResponse, assistantMessage),
+                    assistantMessageSummary(assistantMessage)
+            );
             taskExecutionState = TaskExecutionStateTracker.updateFromAssistantPlan(
                     taskExecutionState,
                     assistantMessage,
@@ -561,7 +472,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             );
 
             if (assistantMessage.toolCalls() == null || assistantMessage.toolCalls().isEmpty()) {
-                log.info("Agent finished with a final answer.");
+                log.debug("agent_finished");
                 return assistantMessage.content() == null ? "" : assistantMessage.content();
             }
 
@@ -615,8 +526,20 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                         request.name(),
                         taskStateBudget
                 );
-                log.debug("Executing tool: {}", request.name());
-                log.info(TO_FRONTEND, "│  🔧 执行工具: {}", request.name());
+                log.debug("tool_call_start name={}", request.name());
+                publishKeyEvent(
+                        memoryId,
+                        AgentExecutionEvent.EventType.TOOL_CALL_START,
+                        request.name(),
+                        "TOOL_CALL",
+                        "RUNNING",
+                        toolRequest.arguments(),
+                        Map.of(
+                                "toolName", request.name(),
+                                "toolCallId", toolCallId
+                        ),
+                        null
+                );
 
                 AiRegisteredTool toolEntry = tools.get(request.name());
                 String outcome;
@@ -646,15 +569,45 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                         throw ex;
                     }
                 }
+                publishKeyEvent(
+                        memoryId,
+                        AgentExecutionEvent.EventType.TOOL_CALL_END,
+                        request.name(),
+                        "TOOL_CALL",
+                        toolEntry == null ? "FAILED" : "SUCCESS",
+                        toolRequest.arguments(),
+                        Map.of(
+                                "toolName", request.name(),
+                                "toolCallId", toolCallId
+                        ),
+                        outcome
+                );
 
-                AiChatMessage persistedToolResult = compactForMemoryIfNeeded(toolRequest, outcome, memoryId);
-                AiChatMessage modelToolResult = modelToolResultForLoop(toolRequest, outcome, persistedToolResult);
-                messageList.appendForModel(modelToolResult);
-                persistToMemory(memory, persistedToolResult);
-
-                log.info(TO_FRONTEND, "│  ✔️  工具执行完成: {}", request.name());
+                AiChatMessage rawToolResult = toolMessage(toolRequest.id(), toolRequest.name(), outcome);
+                messageList.appendForModel(rawToolResult);
+                pendingToolResults.add(rawToolResult);
+                log.debug("tool_call_end name={}", request.name());
             }
         }
+    }
+
+    private void flushPendingToolResults(MessageListState messageList,
+                                         List<AiChatMessage> pendingToolResults,
+                                         AiMemory memory) {
+        if (pendingToolResults == null || pendingToolResults.isEmpty()) {
+            return;
+        }
+        int stubbed = 0;
+        for (AiChatMessage pending : new ArrayList<>(pendingToolResults)) {
+            AiChatMessage budgeted = toolResultBudget.budget(pending);
+            if (budgeted != pending) {
+                messageList.replaceIdentity(pending, budgeted);
+                stubbed++;
+            }
+            persistToMemory(memory, budgeted);
+        }
+        log.debug("tool-result-budget pending={} stubbed={}", pendingToolResults.size(), stubbed);
+        pendingToolResults.clear();
     }
 
     private AiChatMessage normalizeAssistantToolCallIds(AiChatMessage message) {
@@ -730,273 +683,11 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         return AiChatMessage.user(arguments);
     }
 
-    private AiChatMessage compactForMemoryIfNeeded(AiToolExecutionRequest request,
-                                                    String outcome,
-                                                    Object memoryId) {
-        AiChatMessage offloaded = offloadForMemoryIfNeeded(request, outcome, memoryId);
-        if (offloaded != null) {
-            return offloaded;
-        }
-        if (!enableToolResultCompaction || outcome == null || outcome.length() <= memoryToolResultMaxChars) {
-            return toolMessage(request.id(), request.name(), outcome);
-        }
-
-        int head = Math.min(compactToolResultHeadChars, outcome.length());
-        int tail = Math.min(compactToolResultTailChars, Math.max(0, outcome.length() - head));
-        String headPart = outcome.substring(0, head);
-        String tailPart = tail > 0 ? outcome.substring(outcome.length() - tail) : "";
-
-        String compacted = """
-                [Tool Result Compacted]
-                tool=%s
-                originalChars=%d
-                sha256=%s
-                previewHead:
-                %s
-                previewTail:
-                %s
-                """
-                .formatted(request.name(), outcome.length(), sha256Hex(outcome), headPart, tailPart);
-
-        return toolMessage(request.id(), request.name(), compacted);
-    }
-
-    private AiChatMessage modelToolResultForLoop(AiToolExecutionRequest request,
-                                                  String outcome,
-                                                  AiChatMessage persistedToolResult) {
-        if (persistedToolResult == null) {
-            return toolMessage(request.id(), request.name(), outcome);
-        }
-        String persistedText = persistedToolResult.content();
-        if (persistedText == null) {
-            return toolMessage(request.id(), request.name(), outcome);
-        }
-        if (persistedText.startsWith("[Tool Result Compacted]")) {
-            return persistedToolResult;
-        }
-        if (persistedText.startsWith("[Tool Result Offloaded]")) {
-            return buildLoopContinuityToolResult(request, outcome, persistedText);
-        }
-        return toolMessage(request.id(), request.name(), outcome);
-    }
-
-    private AiChatMessage buildLoopContinuityToolResult(AiToolExecutionRequest request,
-                                                         String outcome,
-                                                         String persistedText) {
-        if (outcome == null) {
-            return toolMessage(request.id(), request.name(), persistedText);
-        }
-        if (outcome.length() <= toolResultRehydrateMaxChars) {
-            return toolMessage(request.id(), request.name(), outcome);
-        }
-
-        int previewBudget = Math.max(
-                LOOP_CONTINUITY_MIN_PREVIEW_CHARS,
-                Math.min(outcome.length(), Math.max(256, toolResultRehydrateMaxChars))
-        );
-        int head = Math.max(64, (previewBudget * 2) / 3);
-        head = Math.min(head, outcome.length());
-        int tail = Math.max(32, previewBudget - head);
-        tail = Math.min(tail, Math.max(0, outcome.length() - head));
-        String headPart = outcome.substring(0, head);
-        String tailPart = tail > 0 ? outcome.substring(outcome.length() - tail) : "";
-        String artifactId = extractArtifactId(persistedText);
-
-        String continuity = """
-                %s
-                source=loop-continuity
-                originalChars=%d
-                sha256=%s
-                artifactId=%s
-                previewHead:
-                %s
-                previewTail:
-                %s
-                """
-                .formatted(
-                        persistedText.startsWith("[Tool Result Offloaded]")
-                                ? "[Tool Result Offloaded]" : "[Tool Result Compacted]",
-                        outcome.length(),
-                        sha256Hex(outcome),
-                        artifactId == null ? "n/a" : artifactId,
-                        headPart,
-                        tailPart
-                );
-        return toolMessage(request.id(), request.name(), continuity);
-    }
-
-    private AiChatMessage offloadForMemoryIfNeeded(AiToolExecutionRequest request,
-                                                    String outcome,
-                                                    Object memoryId) {
-        if (!enableToolResultOffload || toolResultArtifactStore == null || outcome == null) {
-            return null;
-        }
-        if (outcome.length() < toolResultOffloadMinChars) {
-            return null;
-        }
-        try {
-            String artifactId = toolResultArtifactStore.save(memoryId, request.name(), request.arguments(), outcome);
-            int head = Math.min(toolResultOffloadHeadChars, outcome.length());
-            int tail = Math.min(toolResultOffloadTailChars, Math.max(0, outcome.length() - head));
-            String headPart = outcome.substring(0, head);
-            String tailPart = tail > 0 ? outcome.substring(outcome.length() - tail) : "";
-
-            String offloaded = """
-                    [Tool Result Offloaded]
-                    tool=%s
-                    originalChars=%d
-                    sha256=%s
-                    artifactId=%s
-                    previewHead:
-                    %s
-                    previewTail:
-                    %s
-                    """
-                    .formatted(request.name(), outcome.length(), sha256Hex(outcome), artifactId, headPart, tailPart);
-            return toolMessage(request.id(), request.name(), offloaded);
-        } catch (RuntimeException e) {
-            log.warn("Tool-result offload failed, fallback to inline memory persistence: tool={}, memoryId={}",
-                    request.name(), memoryId, e);
-            return null;
-        }
-    }
-
-    private static String sha256Hex(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
-    }
-
     private List<AiChatMessage> buildModelMessages(List<AiChatMessage> fullMessages,
                                                    AiChatMessage currentUserMessage,
                                                    TaskExecutionState taskExecutionState) {
         ContextSnapshot snapshot = ContextSnapshot.from(fullMessages, currentUserMessage);
         return contextAssembler.assemble(snapshot, taskExecutionState);
-    }
-
-    private List<AiChatMessage> trimForTotalModelLimit(List<AiChatMessage> messages,
-                                                        AiChatMessage currentUserMessage) {
-        if (messages == null
-                || messages.isEmpty()
-                || modelContextMaxTotalMessages <= 0
-                || messages.size() <= modelContextMaxTotalMessages) {
-            return messages == null ? List.of() : new ArrayList<>(messages);
-        }
-        return contextBudgetPolicy.trimForTotalLimit(messages, currentUserMessage);
-    }
-
-    private List<AiChatMessage> maybeInjectIndexedRehydration(List<AiChatMessage> modelMessages,
-                                                               AiChatMessage currentUserMessage,
-                                                               Object memoryId) {
-        if (!enableToolResultRehydrate
-                || toolResultArtifactStore == null
-                || memoryId == null
-                || modelMessages == null
-                || modelMessages.isEmpty()) {
-            return modelMessages == null ? List.of() : new ArrayList<>(modelMessages);
-        }
-
-        int selectLimit = toolResultRehydrateMaxPerRound <= 0
-                ? Integer.MAX_VALUE
-                : toolResultRehydrateMaxPerRound;
-        int fetchLimit = computeIndexedRehydrateFetchLimit(toolResultRehydrateMaxPerRound);
-        List<ToolResultArtifactRef> refs = selectRefsForIndexedRehydration(
-                toolResultArtifactStore.recent(memoryId, fetchLimit),
-                modelMessages,
-                currentUserMessage,
-                selectLimit
-        );
-        if (refs == null || refs.isEmpty()) {
-            return new ArrayList<>(modelMessages);
-        }
-
-        List<AiChatMessage> appended = new ArrayList<>(modelMessages);
-        Set<String> injectedArtifactIds = collectRehydratedArtifactIds(modelMessages);
-        int injected = 0;
-        for (int i = 0; i < refs.size(); i++) {
-            if (injected >= selectLimit) {
-                break;
-            }
-            ToolResultArtifactRef ref = refs.get(i);
-            if (ref == null || ref.artifactId() == null) {
-                continue;
-            }
-            if (!injectedArtifactIds.add(ref.artifactId())) {
-                continue;
-            }
-            Optional<String> loaded = toolResultArtifactStore.load(ref.artifactId());
-            if (loaded.isEmpty()) {
-                continue;
-            }
-            String payload = loaded.get();
-            if (payload.length() > toolResultRehydrateMaxChars) {
-                continue;
-            }
-            String toolName = ref.toolName() == null || ref.toolName().isBlank()
-                    ? "unknown_tool" : ref.toolName();
-            String rehydrated = """
-                    [Tool Result Rehydrated]
-                    source=index
-                    tool=%s
-                    artifactId=%s
-                    originalChars=%d
-                    text:
-                    %s
-                    """
-                    .formatted(
-                            toolName,
-                            ref.artifactId(),
-                            ref.originalChars() > 0 ? ref.originalChars() : payload.length(),
-                            payload
-                    );
-            appended.add(toolMessage("indexed_rehydrate_" + injected, toolName, rehydrated));
-            injected++;
-        }
-        if (injected == 0) {
-            return new ArrayList<>(modelMessages);
-        }
-        return trimForTotalModelLimit(appended, currentUserMessage);
-    }
-
-    private static Set<String> collectRehydratedArtifactIds(List<AiChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) {
-            return Set.of();
-        }
-        Set<String> artifactIds = new HashSet<>();
-        for (AiChatMessage message : messages) {
-            if (message == null || message.role() != AiChatMessage.Role.TOOL) {
-                continue;
-            }
-            String content = message.content();
-            if (content == null || !content.startsWith("[Tool Result Rehydrated]")) {
-                continue;
-            }
-            String artifactId = extractArtifactId(content);
-            if (artifactId != null) {
-                artifactIds.add(artifactId);
-            }
-        }
-        return artifactIds;
-    }
-
-    private static int computeIndexedRehydrateFetchLimit(int maxCount) {
-        if (maxCount <= 0) {
-            return INDEXED_REHYDRATE_FETCH_LIMIT_MAX;
-        }
-        long suggested = Math.max((long) maxCount * 4L, INDEXED_REHYDRATE_FETCH_LIMIT_MIN);
-        return (int) Math.min(suggested, INDEXED_REHYDRATE_FETCH_LIMIT_MAX);
-    }
-
-    private static List<ToolResultArtifactRef> selectRefsForIndexedRehydration(
-            List<ToolResultArtifactRef> refs,
-            List<AiChatMessage> modelMessages,
-            AiChatMessage currentUserMessage,
-            int maxCount) {
-        return IndexedRehydrateSelector.select(refs, modelMessages, currentUserMessage, maxCount);
     }
 
     private List<AiChatMessage> applyApproxTokenBudget(List<AiChatMessage> messages,
@@ -1012,24 +703,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             return tail(messages, 1);
         }
         return new ArrayList<>(budgetedRuntimeMessages);
-    }
-
-    private static String extractArtifactId(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        String[] lines = text.split("\\R");
-        for (String line : lines) {
-            String trimmed = line == null ? "" : line.trim();
-            if (!trimmed.startsWith("artifactId=")) {
-                continue;
-            }
-            String id = trimmed.substring("artifactId=".length()).trim();
-            if (IndexedRehydrateSelector.isValidArtifactId(id)) {
-                return id;
-            }
-        }
-        return null;
     }
 
     private static String toolBatchFingerprint(List<AiToolCall> requests) {
@@ -1115,6 +788,18 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
             appendForModel(message);
             persistToMemory(memory, message);
         }
+
+        private void replaceIdentity(AiChatMessage expected, AiChatMessage replacement) {
+            if (expected == null || replacement == null) {
+                return;
+            }
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                if (messages.get(i) == expected) {
+                    messages.set(i, replacement);
+                    return;
+                }
+            }
+        }
     }
 
     private static void ensureSystemMessageInMemory(AiMemory memory, Object memoryId, AiChatMessage message) {
@@ -1153,28 +838,19 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
 
     private void logContextGovernance(int iteration,
                                       List<AiChatMessage> beforeBudget,
-                                      List<AiChatMessage> afterFirstBudget,
-                                      List<AiChatMessage> afterIndexedRehydrate,
                                       List<AiChatMessage> finalMessages) {
         if (!log.isDebugEnabled()) {
             return;
         }
         log.debug(
-                "context_governance iter={} base.count={} base.tokens~={} first_budget.count={} first_budget.tokens~={} "
-                        + "indexed_rehydrate.count={} indexed_rehydrate.tokens~={} indexed_rehydrate.blocks={} "
-                        + "final.count={} final.tokens~={} final.rehydrated.blocks={} final.offload.cards={}",
+                "context_governance iter={} base.count={} base.tokens~={} "
+                        + "final.count={} final.tokens~={} final.tool_result_stubs={}",
                 iteration,
                 sizeOf(beforeBudget),
                 estimateApproxTokens(beforeBudget),
-                sizeOf(afterFirstBudget),
-                estimateApproxTokens(afterFirstBudget),
-                sizeOf(afterIndexedRehydrate),
-                estimateApproxTokens(afterIndexedRehydrate),
-                countRehydratedBlocks(afterIndexedRehydrate),
                 sizeOf(finalMessages),
                 estimateApproxTokens(finalMessages),
-                countRehydratedBlocks(finalMessages),
-                countOffloadCards(finalMessages)
+                countToolResultStubs(finalMessages)
         );
     }
 
@@ -1214,24 +890,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         return message.content() == null ? "" : message.content();
     }
 
-  private static int countRehydratedBlocks(List<AiChatMessage> messages) {
-    if (messages == null || messages.isEmpty()) {
-      return 0;
-    }
-    int count = 0;
-    for (AiChatMessage message : messages) {
-      if (message == null) {
-        continue;
-      }
-      String text = message.content();
-      if (text != null && text.contains("[Tool Result Rehydrated]")) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-    private static int countOffloadCards(List<AiChatMessage> messages) {
+    private static int countToolResultStubs(List<AiChatMessage> messages) {
         if (messages == null || messages.isEmpty()) {
             return 0;
         }
@@ -1239,7 +898,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         for (AiChatMessage message : messages) {
             if (message != null && message.role() == AiChatMessage.Role.TOOL) {
                 String text = message.content();
-                if (text != null && text.contains("[Tool Result Offloaded]")) {
+                if (text != null && text.contains("[Tool Result Stub]")) {
                     count++;
                 }
             }
@@ -1270,5 +929,83 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
 
         executionEventPort.recordCustomEvent(event);
         log.debug("Published iteration event: sessionId={}, iteration={}", sessionId, iteration);
+    }
+
+    private void publishKeyEvent(Object memoryId,
+                                 AgentExecutionEvent.EventType eventType,
+                                 String agentName,
+                                 String agentType,
+                                 String status,
+                                 Object input,
+                                 Map<String, Object> metadata,
+                                 Object output) {
+        if (executionEventPort == null || memoryId == null) {
+            return;
+        }
+        AgentExecutionEvent event = AgentExecutionEvent.builder()
+                .sessionId(memoryId.toString())
+                .eventId(UUID.randomUUID().toString())
+                .agentName(agentName)
+                .agentType(agentType)
+                .eventType(eventType)
+                .status(status)
+                .startTime(java.time.LocalDateTime.now())
+                .metadata(metadata)
+                .build();
+        event.setInput(input);
+        event.setOutput(output);
+        executionEventPort.recordCustomEvent(event);
+    }
+
+    private static Map<String, Object> llmResponseMetadata(int iteration,
+                                                           AiChatResponse response,
+                                                           AiChatMessage message) {
+        LinkedHashMap<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("iteration", iteration);
+        metadata.put("model", response.model() == null ? "" : response.model());
+        metadata.put("responseId", response.responseId() == null ? "" : response.responseId());
+        metadata.put("finishReason", response.finishReason() == null ? "" : response.finishReason().name());
+        metadata.put("toolCallCount", message.toolCalls() == null ? 0 : message.toolCalls().size());
+        if (response.tokenUsage() != null) {
+            metadata.put("inputTokens", response.tokenUsage().inputTokens());
+            metadata.put("outputTokens", response.tokenUsage().outputTokens());
+            metadata.put("totalTokens", response.tokenUsage().totalTokens());
+        }
+        return metadata;
+    }
+
+    private static String modelRequestSummary(List<AiChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return "messages=0";
+        }
+        return messages.stream()
+                .map(message -> message.role().name().toLowerCase(Locale.ROOT)
+                        + ":" + summarize(message.content(), 180))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private static String assistantMessageSummary(AiChatMessage message) {
+        if (message == null) {
+            return "";
+        }
+        LinkedHashMap<String, Object> summary = new LinkedHashMap<>();
+        summary.put("content", message.content());
+        summary.put("toolCalls", message.toolCalls());
+        try {
+            return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(summary);
+        } catch (Exception e) {
+            return message.content();
+        }
+    }
+
+    private static String summarize(String value, int maxChars) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.replaceAll("\\s+", " ").trim();
+        if (normalized.length() <= maxChars) {
+            return normalized;
+        }
+        return normalized.substring(0, Math.max(0, maxChars)) + "...";
     }
 }

@@ -81,7 +81,7 @@ public final class ModelContextTokenCounter implements ToIntFunction<AiChatMessa
         } else if (!MODE_APPROX.equals(normalized)) {
             log.warn("unknown model-context token-count mode '{}', fallback to '{}'", mode, MODE_APPROX);
         }
-        log.info("model-context token counter selected: mode={}, model={}, fallbackStage=approx, counter={}",
+        log.debug("model-context token counter selected: mode={}, model={}, fallbackStage=approx, counter={}",
                 MODE_APPROX, safeModel(modelName), APPROX.counterName());
         return APPROX;
     }
@@ -134,7 +134,7 @@ public final class ModelContextTokenCounter implements ToIntFunction<AiChatMessa
                     ? null
                     : modelTokenizerSupplier.get();
             if (tokenizerCounter != null) {
-                log.info("model-context token counter selected: mode={}, model={}, fallbackStage=model_tokenizer, counter={}",
+                log.debug("model-context token counter selected: mode={}, model={}, fallbackStage=model_tokenizer, counter={}",
                         MODE_TOKENIZER, safeModel(modelName), tokenizerCounter.counterName());
                 return tokenizerCounter;
             }
@@ -148,7 +148,7 @@ public final class ModelContextTokenCounter implements ToIntFunction<AiChatMessa
                     ? null
                     : lightweightTokenizerSupplier.get();
             if (tokenizerCounter != null) {
-                log.info("model-context token counter selected: mode={}, model={}, fallbackStage=lightweight_tokenizer, counter={}",
+                log.debug("model-context token counter selected: mode={}, model={}, fallbackStage=lightweight_tokenizer, counter={}",
                         MODE_TOKENIZER, safeModel(modelName), tokenizerCounter.counterName());
                 return tokenizerCounter;
             }
@@ -157,7 +157,7 @@ public final class ModelContextTokenCounter implements ToIntFunction<AiChatMessa
             log.warn("failed to initialize lightweight tokenizer counter, fallback to '{}': {}",
                     MODE_APPROX, ex.getMessage());
         }
-        log.info("model-context token counter selected: mode={}, model={}, fallbackStage=approx, counter={}",
+        log.debug("model-context token counter selected: mode={}, model={}, fallbackStage=approx, counter={}",
                 MODE_TOKENIZER, safeModel(modelName), APPROX.counterName());
         return APPROX;
     }

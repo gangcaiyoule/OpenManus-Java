@@ -56,7 +56,7 @@ public class TaskReflectionTool {
             }
 
             String reflection = """
-                📋 任务反思分析
+                任务反思分析
                 
                 任务信息：
                 - ID: %s
@@ -101,7 +101,7 @@ public class TaskReflectionTool {
                 return "暂无任务历史记录";
             }
 
-            StringBuilder sb = new StringBuilder("📚 任务历史记录\n\n");
+            StringBuilder sb = new StringBuilder("任务历史记录\n\n");
             scopedHistory.values().stream()
                 .sorted((a, b) -> b.executionTime().compareTo(a.executionTime()))
                 .forEach(record -> sb.append(formatHistoryRecord(record)));

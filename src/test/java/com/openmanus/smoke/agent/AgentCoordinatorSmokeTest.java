@@ -10,6 +10,8 @@ import com.openmanus.aiframework.runtime.model.AiFinishReason;
 import com.openmanus.aiframework.runtime.model.AiToolCall;
 import com.openmanus.aiframework.runtime.model.AiTokenUsage;
 import com.openmanus.agent.coordination.AgentCoordinator;
+import com.openmanus.domain.model.AgentExecutionEvent;
+import com.openmanus.domain.service.ExecutionEventPort;
 import com.openmanus.smoke.SmokeTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -292,6 +294,42 @@ class AgentCoordinatorSmokeTest implements SmokeTest {
             assertThat(result).contains("Got the error response");
             assertThat(mockChatModel.getCallCount()).isEqualTo(2);
         }
+
+        @Test
+        @DisplayName("should publish model and tool events for frontend")
+        void execute_withToolCall_publishesFrontendEvents() {
+            // Given
+            CapturingExecutionEventPort eventPort = new CapturingExecutionEventPort();
+            AiToolCall toolCall = new AiToolCall("call_1", "unknownTool", "{\"query\":\"openai\"}");
+            mockChatModel.addResponse(AiChatMessage.assistant("Calling tool", List.of(toolCall)));
+            mockChatModel.addResponse(AiChatMessage.assistant("Done"));
+
+            agent = AgentCoordinator.builder()
+                    .aiChatModel(mockChatModel)
+                    .aiMemoryProvider(sessionId -> mockMemory)
+                    .executionEventPort(eventPort)
+                    .maxIterations(5)
+                    .build();
+
+            // When
+            String result = agent.execute("Test", "test-session");
+
+            // Then
+            assertThat(result).isEqualTo("Done");
+            assertThat(eventPort.events)
+                    .extracting(AgentExecutionEvent::getEventType)
+                    .contains(
+                            AgentExecutionEvent.EventType.LLM_REQUEST,
+                            AgentExecutionEvent.EventType.LLM_RESPONSE,
+                            AgentExecutionEvent.EventType.TOOL_CALL_START,
+                            AgentExecutionEvent.EventType.TOOL_CALL_END
+                    );
+            AgentExecutionEvent toolStart = eventPort.events.stream()
+                    .filter(event -> event.getEventType() == AgentExecutionEvent.EventType.TOOL_CALL_START)
+                    .findFirst()
+                    .orElseThrow();
+            assertThat(toolStart.getInput()).isEqualTo("{\"query\":\"openai\"}");
+        }
     }
 
     @Nested
@@ -453,6 +491,43 @@ class AgentCoordinatorSmokeTest implements SmokeTest {
 
         List<AiChatMessage> getMessages() {
             return messages;
+        }
+    }
+
+    static class CapturingExecutionEventPort implements ExecutionEventPort {
+        private final List<AgentExecutionEvent> events = new ArrayList<>();
+
+        @Override
+        public void startExecutionTracking(String sessionId, String userInput) {
+        }
+
+        @Override
+        public void endExecutionTracking(String sessionId, String finalResult, boolean success) {
+        }
+
+        @Override
+        public void startExecution(String sessionId, String agentName, String agentType, Object input) {
+        }
+
+        @Override
+        public void endExecution(String sessionId, String agentName, String agentType, Object output, String status) {
+        }
+
+        @Override
+        public void recordError(String sessionId, String agentName, String agentType, String error) {
+        }
+
+        @Override
+        public void recordCustomEvent(AgentExecutionEvent event) {
+            events.add(event);
+        }
+
+        @Override
+        public void addListener(String sessionId, Listener listener) {
+        }
+
+        @Override
+        public void removeListener(String sessionId, Listener listener) {
         }
     }
 }

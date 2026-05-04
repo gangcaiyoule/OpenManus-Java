@@ -18,6 +18,7 @@ public class MdcInterceptor implements HandlerInterceptor {
   private static final String SESSION_ID_HEADER = "X-Session-ID";
   private static final String USER_ID_HEADER = "X-User-ID";
   private static final String SESSION_ID_MDC_KEY = "sessionId";
+  private static final String USER_ID_MDC_KEY = "userId";
   private static final String DEFAULT_USER_ID = "001";
 
   private final OpenManusProperties properties;
@@ -34,7 +35,9 @@ public class MdcInterceptor implements HandlerInterceptor {
             request.getHeader(SESSION_ID_HEADER),
             request.getHeader(USER_ID_HEADER),
             defaultUserId());
+    String userId = normalizeUserId(request.getHeader(USER_ID_HEADER), defaultUserId());
     MDC.put(SESSION_ID_MDC_KEY, sessionId);
+    MDC.put(USER_ID_MDC_KEY, userId);
     return true;
   }
 
@@ -42,6 +45,7 @@ public class MdcInterceptor implements HandlerInterceptor {
   public void afterCompletion(
       HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
     MDC.remove(SESSION_ID_MDC_KEY);
+    MDC.remove(USER_ID_MDC_KEY);
   }
 
   static String normalizeSessionId(String rawSessionId, String rawUserId, String defaultUserId) {
@@ -49,6 +53,15 @@ public class MdcInterceptor implements HandlerInterceptor {
     if (sessionId != null) {
       return sessionId;
     }
+    String userId = SessionIdPolicy.normalizeOrNull(rawUserId);
+    if (userId != null) {
+      return userId;
+    }
+    String configuredDefault = SessionIdPolicy.normalizeOrNull(defaultUserId);
+    return configuredDefault == null ? DEFAULT_USER_ID : configuredDefault;
+  }
+
+  static String normalizeUserId(String rawUserId, String defaultUserId) {
     String userId = SessionIdPolicy.normalizeOrNull(rawUserId);
     if (userId != null) {
       return userId;

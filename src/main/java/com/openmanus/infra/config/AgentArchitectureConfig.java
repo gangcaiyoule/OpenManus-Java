@@ -14,7 +14,6 @@ import com.openmanus.aiframework.runtime.AiMemoryProvider;
 import com.openmanus.aiframework.runtime.AiProxyConfig;
 import com.openmanus.aiframework.runtime.AiSearchConfig;
 import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
-import com.openmanus.aiframework.runtime.AiToolResultArtifactStore;
 import com.openmanus.aiframework.tool.AiRegisteredTool;
 import com.openmanus.aiframework.tool.AiToolRegistry;
 import com.openmanus.aiframework.tool.mcp.McpToolRegistryBootstrap;
@@ -70,15 +69,12 @@ public class AgentArchitectureConfig {
     @Bean
     public ShellTool shellTool(AiSessionSandboxGateway sessionSandboxGateway,
                                SandboxPathResolver sandboxPathResolver,
-                               OpenManusProperties properties,
-                               Optional<AiToolResultArtifactStore> toolResultArtifactStore) {
+                               OpenManusProperties properties) {
         return new ShellTool(
                 sessionSandboxGateway,
                 sandboxPathResolver,
-                toolResultArtifactStore.orElse(null),
                 properties.getChatMemory().isShellToolEnabled(),
-                properties.getChatMemory().getShellToolTimeoutSeconds(),
-                properties.getChatMemory().getShellToolMaxOutputChars()
+                properties.getChatMemory().getShellToolTimeoutSeconds()
         );
     }
 
@@ -97,13 +93,14 @@ public class AgentArchitectureConfig {
             AiChatModel chatModel,
             AiMemoryProvider chatMemoryProvider,
             OpenManusProperties properties,
+            AiSessionSandboxGateway sessionSandboxGateway,
             BrowserTool browserTool,
             PythonExecutionTool pythonExecutionTool,
             SearchTool searchTool,
             WebFetchTool webFetchTool,
             ShellTool shellTool,
             TaskReflectionTool taskReflectionTool) {
-        return agentCoordinator(chatModel, chatMemoryProvider, properties, null, null,
+        return agentCoordinator(chatModel, chatMemoryProvider, properties, sessionSandboxGateway, null, null,
                 browserTool, pythonExecutionTool, searchTool, webFetchTool, shellTool, taskReflectionTool);
     }
 
@@ -112,7 +109,7 @@ public class AgentArchitectureConfig {
             AiChatModel chatModel,
             AiMemoryProvider chatMemoryProvider,
             OpenManusProperties properties,
-            AiToolResultArtifactStore toolResultArtifactStore,
+            AiSessionSandboxGateway sessionSandboxGateway,
             BrowserTool browserTool,
             PythonExecutionTool pythonExecutionTool,
             SearchTool searchTool,
@@ -125,7 +122,7 @@ public class AgentArchitectureConfig {
                 chatModel,
                 chatMemoryProvider,
                 properties,
-                toolResultArtifactStore,
+                sessionSandboxGateway,
                 mcpToolRegistryBootstrap.orElse(null),
                 executionEventPort,
                 browserTool,
@@ -141,7 +138,7 @@ public class AgentArchitectureConfig {
             AiChatModel chatModel,
             AiMemoryProvider chatMemoryProvider,
             OpenManusProperties properties,
-            AiToolResultArtifactStore toolResultArtifactStore,
+            AiSessionSandboxGateway sessionSandboxGateway,
             ExecutionEventPort executionEventPort,
             BrowserTool browserTool,
             PythonExecutionTool pythonExecutionTool,
@@ -153,7 +150,7 @@ public class AgentArchitectureConfig {
                 chatModel,
                 chatMemoryProvider,
                 properties,
-                toolResultArtifactStore,
+                sessionSandboxGateway,
                 null,
                 executionEventPort,
                 browserTool,
@@ -169,7 +166,7 @@ public class AgentArchitectureConfig {
             AiChatModel chatModel,
             AiMemoryProvider chatMemoryProvider,
             OpenManusProperties properties,
-            AiToolResultArtifactStore toolResultArtifactStore,
+            AiSessionSandboxGateway sessionSandboxGateway,
             McpToolRegistryBootstrap mcpToolRegistryBootstrap,
             ExecutionEventPort executionEventPort,
             BrowserTool browserTool,
@@ -181,10 +178,7 @@ public class AgentArchitectureConfig {
         AgentCoordinator.Builder builder = AgentCoordinator.builder()
                 .aiChatModel(chatModel)
                 .aiMemoryProvider(chatMemoryProvider)
-                .enableToolResultCompaction(properties.getChatMemory().isCompactToolResultsEnabled())
-                .memoryToolResultMaxChars(properties.getChatMemory().getToolResultMaxChars())
-                .compactToolResultHeadChars(properties.getChatMemory().getCompactToolResultHeadChars())
-                .compactToolResultTailChars(properties.getChatMemory().getCompactToolResultTailChars())
+                .sessionSandboxGateway(sessionSandboxGateway)
                 .modelContextMaxMessages(properties.getChatMemory().getModelContextMaxMessages())
                 .modelContextMaxTotalMessages(properties.getChatMemory().getModelContextMaxTotalMessages())
                 .modelContextMaxApproxTokens(properties.getChatMemory().getModelContextMaxApproxTokens())
@@ -198,14 +192,11 @@ public class AgentArchitectureConfig {
                 .taskStateLastFailureMaxChars(properties.getChatMemory().getTaskStateLastFailureMaxChars())
                 .taskStateTodoMaxItems(properties.getChatMemory().getTaskStateTodoMaxItems())
                 .taskStateTodoItemMaxChars(properties.getChatMemory().getTaskStateTodoItemMaxChars())
-                .enableToolResultOffload(properties.getChatMemory().isToolResultOffloadEnabled())
-                .toolResultOffloadMinChars(properties.getChatMemory().getToolResultOffloadMinChars())
-                .toolResultOffloadHeadChars(properties.getChatMemory().getToolResultOffloadHeadChars())
-                .toolResultOffloadTailChars(properties.getChatMemory().getToolResultOffloadTailChars())
-                .enableToolResultRehydrate(properties.getChatMemory().isToolResultRehydrateEnabled())
-                .toolResultRehydrateMaxChars(properties.getChatMemory().getToolResultRehydrateMaxChars())
-                .toolResultRehydrateMaxPerRound(properties.getChatMemory().getToolResultRehydrateMaxPerRound())
-                .toolResultArtifactStore(toolResultArtifactStore)
+                .enableToolResultBudget(properties.getChatMemory().isToolResultBudgetEnabled())
+                .toolResultBudgetMinChars(properties.getChatMemory().getToolResultBudgetMinChars())
+                .toolResultBudgetPreviewHeadChars(properties.getChatMemory().getToolResultBudgetPreviewHeadChars())
+                .toolResultBudgetPreviewTailChars(properties.getChatMemory().getToolResultBudgetPreviewTailChars())
+                .toolResultBudgetDecayChars(properties.getChatMemory().getToolResultBudgetDecayChars())
                 .executionEventPort(executionEventPort)
                 .browserTool(browserTool)
                 .pythonExecutionTool(pythonExecutionTool)

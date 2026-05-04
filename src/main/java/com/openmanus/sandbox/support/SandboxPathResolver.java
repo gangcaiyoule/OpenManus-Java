@@ -8,6 +8,8 @@ import java.nio.file.Paths;
 
 public class SandboxPathResolver {
 
+    private static final String DEFAULT_USER_ID = "001";
+
     private final AiSessionSandboxGateway sessionSandboxGateway;
 
     public SandboxPathResolver(AiSessionSandboxGateway sessionSandboxGateway) {
@@ -15,21 +17,21 @@ public class SandboxPathResolver {
     }
 
     public Path resolveSandboxPath(String userPath) {
-        String sessionId = requireSessionId();
-        return Paths.get(sessionSandboxGateway.resolveWorkspacePath(sessionId, userPath)).normalize();
+        String sandboxKey = currentSandboxKey();
+        return Paths.get(sessionSandboxGateway.resolveWorkspacePath(sandboxKey, userPath)).normalize();
     }
 
     public String readTextFile(String userPath) {
-        String sessionId = requireSessionId();
-        String resolved = sessionSandboxGateway.resolveWorkspacePath(sessionId, userPath);
-        return sessionSandboxGateway.readTextFile(sessionId, resolved);
+        String sandboxKey = currentSandboxKey();
+        String resolved = sessionSandboxGateway.resolveWorkspacePath(sandboxKey, userPath);
+        return sessionSandboxGateway.readTextFile(sandboxKey, resolved);
     }
 
-    private String requireSessionId() {
-        String sessionId = MDC.get("sessionId");
-        if (sessionId == null || sessionId.isBlank()) {
-            throw new SecurityException("缺少会话ID，拒绝访问文件沙盒");
+    public String currentSandboxKey() {
+        String userId = MDC.get("userId");
+        if (userId != null && !userId.isBlank()) {
+            return userId;
         }
-        return sessionId;
+        return DEFAULT_USER_ID;
     }
 }

@@ -257,26 +257,6 @@ public class OpenManusProperties {
                             quarantine, chatMemory.isQuarantineCorruptedFiles()));
                 }
             }
-            if (chatMemory.toolResultMaxChars == null) {
-                String maxToolResultChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_MAX_CHARS");
-                if (!isBlank(maxToolResultChars)) {
-                    chatMemory.setToolResultMaxChars(parsePositiveInt(maxToolResultChars, chatMemory.getToolResultMaxChars()));
-                }
-            }
-            if (chatMemory.compactToolResultHeadChars == null) {
-                String compactHeadChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_HEAD_CHARS");
-                if (!isBlank(compactHeadChars)) {
-                    chatMemory.setCompactToolResultHeadChars(parsePositiveInt(
-                            compactHeadChars, chatMemory.getCompactToolResultHeadChars()));
-                }
-            }
-            if (chatMemory.compactToolResultTailChars == null) {
-                String compactTailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_TAIL_CHARS");
-                if (!isBlank(compactTailChars)) {
-                    chatMemory.setCompactToolResultTailChars(parsePositiveInt(
-                            compactTailChars, chatMemory.getCompactToolResultTailChars()));
-                }
-            }
             if (chatMemory.modelContextMaxMessages == null) {
                 String contextMaxMessages = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_MESSAGES");
                 if (!isBlank(contextMaxMessages)) {
@@ -305,13 +285,6 @@ public class OpenManusProperties {
                         "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE");
                 if (!isBlank(countMode)) {
                     chatMemory.setModelContextTokenCountMode(countMode);
-                }
-            }
-            if (chatMemory.compactToolResultsEnabled == null) {
-                String compactEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_TOOL_RESULTS_ENABLED");
-                if (!isBlank(compactEnabled)) {
-                    chatMemory.setCompactToolResultsEnabled(parseBooleanStrict(
-                            compactEnabled, chatMemory.isCompactToolResultsEnabled()));
                 }
             }
             if (chatMemory.reactMaxIterations == null) {
@@ -371,67 +344,39 @@ public class OpenManusProperties {
                             todoItemMaxChars, chatMemory.getTaskStateTodoItemMaxChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadEnabled == null) {
-                String offloadEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_ENABLED");
-                if (!isBlank(offloadEnabled)) {
-                    chatMemory.setToolResultOffloadEnabled(parseBooleanStrict(
-                            offloadEnabled, chatMemory.isToolResultOffloadEnabled()));
+            if (chatMemory.toolResultBudgetEnabled == null) {
+                String budgetEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_ENABLED");
+                if (!isBlank(budgetEnabled)) {
+                    chatMemory.setToolResultBudgetEnabled(parseBooleanStrict(
+                            budgetEnabled, chatMemory.isToolResultBudgetEnabled()));
                 }
             }
-            if (chatMemory.toolResultOffloadMinChars == null) {
-                String offloadMinChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_MIN_CHARS");
-                if (!isBlank(offloadMinChars)) {
-                    chatMemory.setToolResultOffloadMinChars(parsePositiveInt(
-                            offloadMinChars, chatMemory.getToolResultOffloadMinChars()));
+            if (chatMemory.toolResultBudgetMinChars == null) {
+                String minChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_MIN_CHARS");
+                if (!isBlank(minChars)) {
+                    chatMemory.setToolResultBudgetMinChars(parsePositiveInt(
+                            minChars, chatMemory.getToolResultBudgetMinChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadHeadChars == null) {
-                String offloadHeadChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_HEAD_CHARS");
-                if (!isBlank(offloadHeadChars)) {
-                    chatMemory.setToolResultOffloadHeadChars(parsePositiveInt(
-                            offloadHeadChars, chatMemory.getToolResultOffloadHeadChars()));
+            if (chatMemory.toolResultBudgetPreviewHeadChars == null) {
+                String headChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS");
+                if (!isBlank(headChars)) {
+                    chatMemory.setToolResultBudgetPreviewHeadChars(parsePositiveInt(
+                            headChars, chatMemory.getToolResultBudgetPreviewHeadChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadTailChars == null) {
-                String offloadTailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_TAIL_CHARS");
-                if (!isBlank(offloadTailChars)) {
-                    chatMemory.setToolResultOffloadTailChars(parsePositiveInt(
-                            offloadTailChars, chatMemory.getToolResultOffloadTailChars()));
+            if (chatMemory.toolResultBudgetPreviewTailChars == null) {
+                String tailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS");
+                if (!isBlank(tailChars)) {
+                    chatMemory.setToolResultBudgetPreviewTailChars(parsePositiveInt(
+                            tailChars, chatMemory.getToolResultBudgetPreviewTailChars()));
                 }
             }
-            if (shouldApplyToolResultArtifactStoreDirFallback(chatMemory)) {
-                String artifactDir = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_STORE_DIR");
-                if (!isBlank(artifactDir)) {
-                    chatMemory.setToolResultArtifactStoreDir(artifactDir);
-                }
-            }
-            if (chatMemory.toolResultRehydrateEnabled == null) {
-                String rehydrateEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_ENABLED");
-                if (!isBlank(rehydrateEnabled)) {
-                    chatMemory.setToolResultRehydrateEnabled(parseBooleanStrict(
-                            rehydrateEnabled, chatMemory.isToolResultRehydrateEnabled()));
-                }
-            }
-            if (chatMemory.toolResultRehydrateMaxChars == null) {
-                String rehydrateMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_CHARS");
-                if (!isBlank(rehydrateMaxChars)) {
-                    chatMemory.setToolResultRehydrateMaxChars(parsePositiveInt(
-                            rehydrateMaxChars, chatMemory.getToolResultRehydrateMaxChars()));
-                }
-            }
-            if (chatMemory.toolResultRehydrateMaxPerRound == null) {
-                String rehydrateMaxPerRound = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND");
-                if (!isBlank(rehydrateMaxPerRound)) {
-                    chatMemory.setToolResultRehydrateMaxPerRound(parseNonNegativeInt(
-                            rehydrateMaxPerRound, chatMemory.getToolResultRehydrateMaxPerRound()));
-                }
-            }
-            if (chatMemory.toolResultArtifactMaxIndexEntriesPerMemory == null) {
-                String maxIndexEntries = firstNonBlankEnv(
-                        "OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY");
-                if (!isBlank(maxIndexEntries)) {
-                    chatMemory.setToolResultArtifactMaxIndexEntriesPerMemory(parsePositiveInt(
-                            maxIndexEntries, chatMemory.getToolResultArtifactMaxIndexEntriesPerMemory()));
+            if (chatMemory.toolResultBudgetDecayChars == null) {
+                String decayChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_DECAY_CHARS");
+                if (!isBlank(decayChars)) {
+                    chatMemory.setToolResultBudgetDecayChars(parseNonNegativeInt(
+                            decayChars, chatMemory.getToolResultBudgetDecayChars()));
                 }
             }
             if (chatMemory.shellToolEnabled == null) {
@@ -444,12 +389,6 @@ public class OpenManusProperties {
                 String shellTimeout = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_TIMEOUT_SECONDS");
                 if (!isBlank(shellTimeout)) {
                     chatMemory.setShellToolTimeoutSeconds(parsePositiveInt(shellTimeout, chatMemory.getShellToolTimeoutSeconds()));
-                }
-            }
-            if (chatMemory.shellToolMaxOutputChars == null) {
-                String shellMax = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_MAX_OUTPUT_CHARS");
-                if (!isBlank(shellMax)) {
-                    chatMemory.setShellToolMaxOutputChars(parsePositiveInt(shellMax, chatMemory.getShellToolMaxOutputChars()));
                 }
             }
             if (chatMemory.getModelContextMaxTotalMessages() == 1) {
@@ -579,17 +518,6 @@ public class OpenManusProperties {
         return ChatMemoryConfig.DEFAULT_FILE_STORE_DIR.equals(dir);
     }
 
-    private static boolean shouldApplyToolResultArtifactStoreDirFallback(ChatMemoryConfig chatMemory) {
-        if (chatMemory == null) {
-            return false;
-        }
-        String dir = chatMemory.getToolResultArtifactStoreDir();
-        if (isBlank(dir)) {
-            return true;
-        }
-        return ChatMemoryConfig.DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR.equals(dir);
-    }
-    
     /**
      * Application basic configuration
      */
@@ -738,13 +666,8 @@ public class OpenManusProperties {
     public static class ChatMemoryConfig {
         static final String DEFAULT_FILE_STORE_DIR =
                 System.getProperty("java.io.tmpdir") + "/openmanus/chat-memory";
-        static final String DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR =
-                System.getProperty("java.io.tmpdir") + "/openmanus/tool-result-artifacts";
         private static final int DEFAULT_RETENTION_DAYS = 30;
         private static final boolean DEFAULT_QUARANTINE_CORRUPTED_FILES = true;
-        private static final int DEFAULT_TOOL_RESULT_MAX_CHARS = 4000;
-        private static final int DEFAULT_COMPACT_TOOL_RESULT_HEAD_CHARS = 300;
-        private static final int DEFAULT_COMPACT_TOOL_RESULT_TAIL_CHARS = 200;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_TOTAL_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_APPROX_TOKENS = 128000;
@@ -757,17 +680,13 @@ public class OpenManusProperties {
         private static final int DEFAULT_TASK_STATE_LAST_FAILURE_MAX_CHARS = 240;
         private static final int DEFAULT_TASK_STATE_TODO_MAX_ITEMS = 6;
         private static final int DEFAULT_TASK_STATE_TODO_ITEM_MAX_CHARS = 120;
-        private static final boolean DEFAULT_TOOL_RESULT_OFFLOAD_ENABLED = true;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_MIN_CHARS = 12000;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_HEAD_CHARS = 240;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_TAIL_CHARS = 160;
-        private static final boolean DEFAULT_TOOL_RESULT_REHYDRATE_ENABLED = true;
-        private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_CHARS = 8000;
-        private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND = 2;
-        private static final int DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY = 20000;
+        private static final boolean DEFAULT_TOOL_RESULT_BUDGET_ENABLED = true;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_MIN_CHARS = 12000;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS = 240;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS = 160;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_DECAY_CHARS = 0;
         private static final boolean DEFAULT_SHELL_TOOL_ENABLED = true;
         private static final int DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS = 15;
-        private static final int DEFAULT_SHELL_TOOL_MAX_OUTPUT_CHARS = 8000;
 
         /**
          * Chat memory store type: file | in-memory.
@@ -786,19 +705,6 @@ public class OpenManusProperties {
          * Move corrupted JSON files into quarantine directory before failing read.
          */
         private Boolean quarantineCorruptedFiles = null;
-        /**
-         * Maximum tool-result chars persisted in long-term chat memory.
-         * Only used when compact-tool-results-enabled=true.
-         */
-        private Integer toolResultMaxChars = null;
-        /**
-         * Number of leading chars preserved when tool result is compacted.
-         */
-        private Integer compactToolResultHeadChars = null;
-        /**
-         * Number of trailing chars preserved when tool result is compacted.
-         */
-        private Integer compactToolResultTailChars = null;
         /**
          * Max number of historical messages sent to model each round.
          * 0 means unlimited.
@@ -820,11 +726,6 @@ public class OpenManusProperties {
          * Supported values: approx | tokenizer.
          */
         private String modelContextTokenCountMode = "";
-        /**
-         * Whether to compact large tool results before persisting into long-term chat memory.
-         * Default false to keep full message continuity.
-         */
-        private Boolean compactToolResultsEnabled = null;
         /**
          * Max ReAct loop iterations for one execute. 0 means unlimited.
          */
@@ -859,44 +760,25 @@ public class OpenManusProperties {
          */
         private Integer taskStateTodoItemMaxChars = null;
         /**
-         * Whether to offload very large tool results into external artifact storage (lossless).
-         * Chat memory only keeps a compact index card when enabled.
+         * Whether to replace oversized tool results with explicit sandbox file stubs before model API calls.
          */
-        private Boolean toolResultOffloadEnabled = null;
+        private Boolean toolResultBudgetEnabled = null;
         /**
-         * Minimum chars to trigger tool-result offloading.
+         * Minimum chars to trigger tool-result budget offload.
          */
-        private Integer toolResultOffloadMinChars = null;
+        private Integer toolResultBudgetMinChars = null;
         /**
-         * Leading preview chars kept in tool-result offload card.
+         * Leading preview chars kept in the tool-result stub.
          */
-        private Integer toolResultOffloadHeadChars = null;
+        private Integer toolResultBudgetPreviewHeadChars = null;
         /**
-         * Trailing preview chars kept in tool-result offload card.
+         * Trailing preview chars kept in the tool-result stub.
          */
-        private Integer toolResultOffloadTailChars = null;
+        private Integer toolResultBudgetPreviewTailChars = null;
         /**
-         * Artifact store directory used when offloading large tool results.
+         * Optional context-decay chars threshold. 0 disables decay-triggered offload.
          */
-        private String toolResultArtifactStoreDir = DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR;
-        /**
-         * Whether to rehydrate compacted tool results from artifact store into model input.
-         */
-        private Boolean toolResultRehydrateEnabled = null;
-        /**
-         * Max chars allowed for each rehydrated tool result.
-         */
-        private Integer toolResultRehydrateMaxChars = null;
-        /**
-         * Max rehydrated tool-result blocks injected per model round.
-         * 0 means unlimited.
-         */
-        private Integer toolResultRehydrateMaxPerRound = null;
-        /**
-         * Per conversation, maximum index references retained in artifact index file.
-         * Exceeded history is pruned from the index tail to avoid long-running sessions becoming slow.
-         */
-        private Integer toolResultArtifactMaxIndexEntriesPerMemory = null;
+        private Integer toolResultBudgetDecayChars = null;
         /**
          * Whether to enable generic shell tool for model-driven file discovery and partial reads.
          */
@@ -905,37 +787,12 @@ public class OpenManusProperties {
          * Timeout seconds for one shell command execution.
          */
         private Integer shellToolTimeoutSeconds = null;
-        /**
-         * Max chars returned in stdout/stderr preview. Excess output is offloaded to artifact or file snapshot.
-         */
-        private Integer shellToolMaxOutputChars = null;
-
-        public boolean isCompactToolResultsEnabled() {
-            return Boolean.TRUE.equals(compactToolResultsEnabled);
-        }
-
         public int getRetentionDays() {
             return retentionDays == null ? DEFAULT_RETENTION_DAYS : retentionDays;
         }
 
         public boolean isQuarantineCorruptedFiles() {
             return quarantineCorruptedFiles == null ? DEFAULT_QUARANTINE_CORRUPTED_FILES : quarantineCorruptedFiles;
-        }
-
-        public int getToolResultMaxChars() {
-            return toolResultMaxChars == null ? DEFAULT_TOOL_RESULT_MAX_CHARS : toolResultMaxChars;
-        }
-
-        public int getCompactToolResultHeadChars() {
-            return compactToolResultHeadChars == null
-                    ? DEFAULT_COMPACT_TOOL_RESULT_HEAD_CHARS
-                    : compactToolResultHeadChars;
-        }
-
-        public int getCompactToolResultTailChars() {
-            return compactToolResultTailChars == null
-                    ? DEFAULT_COMPACT_TOOL_RESULT_TAIL_CHARS
-                    : compactToolResultTailChars;
         }
 
         public int getModelContextMaxMessages() {
@@ -1012,52 +869,34 @@ public class OpenManusProperties {
                     : taskStateTodoItemMaxChars;
         }
 
-        public boolean isToolResultOffloadEnabled() {
-            return toolResultOffloadEnabled == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_ENABLED
-                    : Boolean.TRUE.equals(toolResultOffloadEnabled);
+        public boolean isToolResultBudgetEnabled() {
+            return toolResultBudgetEnabled == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_ENABLED
+                    : Boolean.TRUE.equals(toolResultBudgetEnabled);
         }
 
-        public int getToolResultOffloadMinChars() {
-            return toolResultOffloadMinChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_MIN_CHARS
-                    : toolResultOffloadMinChars;
+        public int getToolResultBudgetMinChars() {
+            return toolResultBudgetMinChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_MIN_CHARS
+                    : toolResultBudgetMinChars;
         }
 
-        public int getToolResultOffloadHeadChars() {
-            return toolResultOffloadHeadChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_HEAD_CHARS
-                    : toolResultOffloadHeadChars;
+        public int getToolResultBudgetPreviewHeadChars() {
+            return toolResultBudgetPreviewHeadChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS
+                    : toolResultBudgetPreviewHeadChars;
         }
 
-        public int getToolResultOffloadTailChars() {
-            return toolResultOffloadTailChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_TAIL_CHARS
-                    : toolResultOffloadTailChars;
+        public int getToolResultBudgetPreviewTailChars() {
+            return toolResultBudgetPreviewTailChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS
+                    : toolResultBudgetPreviewTailChars;
         }
 
-        public boolean isToolResultRehydrateEnabled() {
-            return toolResultRehydrateEnabled == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_ENABLED
-                    : Boolean.TRUE.equals(toolResultRehydrateEnabled);
-        }
-
-        public int getToolResultRehydrateMaxChars() {
-            return toolResultRehydrateMaxChars == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_MAX_CHARS
-                    : toolResultRehydrateMaxChars;
-        }
-
-        public int getToolResultRehydrateMaxPerRound() {
-            return toolResultRehydrateMaxPerRound == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND
-                    : toolResultRehydrateMaxPerRound;
-        }
-
-        public int getToolResultArtifactMaxIndexEntriesPerMemory() {
-            return toolResultArtifactMaxIndexEntriesPerMemory == null
-                    ? DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY
-                    : toolResultArtifactMaxIndexEntriesPerMemory;
+        public int getToolResultBudgetDecayChars() {
+            return toolResultBudgetDecayChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_DECAY_CHARS
+                    : toolResultBudgetDecayChars;
         }
 
         public boolean isShellToolEnabled() {
@@ -1066,10 +905,6 @@ public class OpenManusProperties {
 
         public int getShellToolTimeoutSeconds() {
             return shellToolTimeoutSeconds == null ? DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS : shellToolTimeoutSeconds;
-        }
-
-        public int getShellToolMaxOutputChars() {
-            return shellToolMaxOutputChars == null ? DEFAULT_SHELL_TOOL_MAX_OUTPUT_CHARS : shellToolMaxOutputChars;
         }
 
         /**
@@ -1131,28 +966,20 @@ public class OpenManusProperties {
             this.taskStateTodoItemMaxChars = clampPositiveOrNull(taskStateTodoItemMaxChars);
         }
 
-        public void setToolResultOffloadMinChars(Integer toolResultOffloadMinChars) {
-            this.toolResultOffloadMinChars = clampPositiveOrNull(toolResultOffloadMinChars);
+        public void setToolResultBudgetMinChars(Integer toolResultBudgetMinChars) {
+            this.toolResultBudgetMinChars = clampPositiveOrNull(toolResultBudgetMinChars);
         }
 
-        public void setToolResultOffloadHeadChars(Integer toolResultOffloadHeadChars) {
-            this.toolResultOffloadHeadChars = clampPositiveOrNull(toolResultOffloadHeadChars);
+        public void setToolResultBudgetPreviewHeadChars(Integer toolResultBudgetPreviewHeadChars) {
+            this.toolResultBudgetPreviewHeadChars = clampPositiveOrNull(toolResultBudgetPreviewHeadChars);
         }
 
-        public void setToolResultOffloadTailChars(Integer toolResultOffloadTailChars) {
-            this.toolResultOffloadTailChars = clampPositiveOrNull(toolResultOffloadTailChars);
+        public void setToolResultBudgetPreviewTailChars(Integer toolResultBudgetPreviewTailChars) {
+            this.toolResultBudgetPreviewTailChars = clampPositiveOrNull(toolResultBudgetPreviewTailChars);
         }
 
-        public void setToolResultRehydrateMaxChars(Integer toolResultRehydrateMaxChars) {
-            this.toolResultRehydrateMaxChars = clampPositiveOrNull(toolResultRehydrateMaxChars);
-        }
-
-        public void setToolResultRehydrateMaxPerRound(Integer toolResultRehydrateMaxPerRound) {
-            this.toolResultRehydrateMaxPerRound = clampNonNegativeOrNull(toolResultRehydrateMaxPerRound);
-        }
-
-        public void setToolResultArtifactMaxIndexEntriesPerMemory(Integer toolResultArtifactMaxIndexEntriesPerMemory) {
-            this.toolResultArtifactMaxIndexEntriesPerMemory = clampPositiveOrNull(toolResultArtifactMaxIndexEntriesPerMemory);
+        public void setToolResultBudgetDecayChars(Integer toolResultBudgetDecayChars) {
+            this.toolResultBudgetDecayChars = clampNonNegativeOrNull(toolResultBudgetDecayChars);
         }
 
         private static Integer clampPositiveOrNull(Integer value) {

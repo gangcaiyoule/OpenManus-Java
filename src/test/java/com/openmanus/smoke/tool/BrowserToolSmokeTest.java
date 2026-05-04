@@ -27,6 +27,7 @@ class BrowserToolSmokeTest implements SmokeTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String TEST_SESSION_ID = "test-session";
+    private static final String TEST_USER_ID = "001";
 
     private AiSessionSandboxGateway mockGateway;
     private ExecutionEventPort mockExecutionEventPort;
@@ -35,6 +36,7 @@ class BrowserToolSmokeTest implements SmokeTest {
     @BeforeEach
     void setUp() {
         MDC.put("sessionId", TEST_SESSION_ID);
+        MDC.put("userId", TEST_USER_ID);
         mockGateway = mock(AiSessionSandboxGateway.class);
         mockExecutionEventPort = mock(ExecutionEventPort.class);
         browserTool = new BrowserTool(mockGateway, mockExecutionEventPort);
@@ -48,15 +50,15 @@ class BrowserToolSmokeTest implements SmokeTest {
     @Test
     @DisplayName("openUrl should normalize url and return json")
     void openUrl_normalizesAndReturnsJson() throws Exception {
-        when(mockGateway.getOrCreateSandbox(TEST_SESSION_ID)).thenReturn(new AiSessionSandboxInfo(
-                TEST_SESSION_ID, null, "/workspace", "https://vnc.local", null, "RUNNING"
+        when(mockGateway.getOrCreateSandbox(TEST_USER_ID)).thenReturn(new AiSessionSandboxInfo(
+                TEST_USER_ID, null, "/workspace", "https://vnc.local", null, "RUNNING"
         ));
         String result = browserTool.openUrl("example.com/path");
         JsonNode node = MAPPER.readTree(result);
         assertThat(node.get("url").asText()).isEqualTo("https://example.com/path");
         assertThat(node.get("previewMode").asText()).isEqualTo("vnc");
         assertThat(node.get("sandboxVncUrl").asText()).contains("vnc.local");
-        verify(mockGateway).openBrowserUrl(TEST_SESSION_ID, "https://example.com/path");
+        verify(mockGateway).openBrowserUrl(TEST_USER_ID, "https://example.com/path");
         verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("BROWSER_URL_OPENED")));
     }
 

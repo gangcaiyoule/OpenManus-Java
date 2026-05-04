@@ -2,118 +2,108 @@
 
 ## 1. 开发目标
 
-围绕 `aifrframework` 构建一个更稳定、可持续演进的 Agent 执行框架。
+围绕 `aifrframework` 构建稳定、可持续演进的 Agent 执行框架。当前主线是文件级动态装载收尾：把上下文治理从旧 artifact / rehydrate / snapshot 链路收敛为“工具原始结果 + API 前统一预算 + Shell 显式读取”。
 
-### 1.1 总目标
+## 2. 当前状态
 
-1. 上下文管理能力建设
-2. `CodeAct + MCP` 执行能力建设
-3. `Multi-Agent` 协同能力研究
+- **日期**：2026-05-04
+- **阶段**：文件级动态装载收尾修复中
+- **状态**：implementation-ready for cleanup
 
-### 1.2 目标一：上下文管理
+本轮修复目标：
 
-成熟动态上下文系统包含四块能力：
+1. 大工具结果只由 `ToolResultBudget` 在 executor 调模型前统一处理。
+2. 完整大结果只落到 `.openmanus/tool-results/`。
+3. 模型请求中只看到 `[Tool Result Stub]`、相对 path、hash、长度与 head/tail preview。
+4. stub 只提示模型通过 `runShellCommand` 使用 `cat/head/tail/grep/rg` 显式读取。
+5. `SearchTool`、`WebFetchTool`、`ShellTool` 不自行落盘、不生成 preview stub、不做摘要压缩。
+6. 后端 WebFetch 不再产出 `.openmanus/web` snapshot。
 
-| 能力 | 目标 | 状态 |
-|------|------|------|
-| 结构化事实记忆 | 可检索的 facts/decisions/constraints | ❌ 未实现 |
-| 文件级动态装载 | 工作区文件按需发现、按需读取、按预算注入 | ⏳ **下一步** |
-| MCP resource 融合 | agent 知道有哪些资源可按需读取 | ❌ 未实现 |
-| 更强任务分治 | 主任务与子任务上下文单元分治 | ❌ 未实现 |
+## 3. 工具策略
 
-### 1.3 目标二：CodeAct + MCP
+| 工具 | 策略 |
+|---|---|
+| `ToolResultBudget` | 唯一预算入口；超过阈值时写 `.openmanus/tool-results/{yyyyMMdd-HHmmssSSS}-{shortHash}.txt` 并生成 stub |
+| `runShellCommand` | 唯一显式读取入口；当前期接受并执行所有 Shell 命令，只校验 `cwd` 在 workspace 内，命令内容由 Docker sandbox 隔离兜底 |
+| `browser_fetch_web` | 返回网页原始正文：`url/contentType/originalChars/body`；不写 `.openmanus/web`，不返回 snapshot path/preview |
+| `search_web` | 保留搜索结果条数上限；不做模型可见内容长度裁剪，大搜索结果交给 executor budget |
 
-- 明确"计划 -> 执行 -> 观察 -> 调整"的循环结构
-- MCP 工具发现、注册、调用桥接
-- 工具注册机制同时容纳本地工具与 MCP 工具
+Shell 当前边界：
 
-### 1.4 目标三：Multi-Agent 协同研究
+- 当前阶段不做 Shell 命令内容级 parser、读命令路径参数识别或复杂语法拒绝。
+- `runShellCommand` 仍校验 `cwd`，确保工作目录解析在用户 workspace 内。
+- Shell 命令实际在 Docker sandbox 中执行；本轮以 Docker 隔离作为主要安全边界。
+- `cat/head/tail/grep/rg` 等命令仍是模型读取 `.openmanus/tool-results/` 的推荐方式，但不在工具层单独拦截其他 Shell 语法。
 
-- 研究主 Agent 与子 Agent 的职责边界
-- 评估与现有上下文治理、`CodeAct`、`MCP` 的接入方式
+Search 与 WebFetch 的边界：
 
----
+- `search_web` 用于发现候选网页、标题、链接和搜索摘要，不打开目标网页，不返回目标网页正文。
+- `browser_fetch_web` 用于打开并抓取指定 URL 的原始响应正文，适合在已有 URL 后获取页面内容。
+- 二者不是完全重复：Search 解决“找什么网页”，WebFetch 解决“读这个网页”。
+- 未来可以考虑将 WebFetch 返回内容进一步做正文抽取、charset 识别或 MIME 策略；本轮只做后端停止 snapshot 产出。
 
-## 2. 开发进度
+## 4. 已清理旧链路
 
-### 2.1 当前阶段
+以下方向不再作为默认上下文治理能力：
 
-- **日期**：2026-05-02
-- **阶段**：上下文治理 A/B/收口已完成，下一步主线为文件级动态装载
-- **状态**：Stable Baseline
+- artifact store 抽象、实现、bean wiring 与相关配置。
+- indexed rehydrate 与 `[Tool Result Rehydrated]`。
+- 工具结果摘要压缩卡片。
+- `HistoricalContextSummarizer` 中 artifact-specific 字段。
+- 默认模型可见 `FileRead` 工具面。
 
-### 2.2 已完成功能（代码验证确认）
+## 5. 本轮不做
 
-| 模块 | 功能 | 验证 |
-|------|------|------|
-| Agent 执行 | CodeAct ReAct 循环 | `AbstractAgentExecutor` line 511-657 |
-| 上下文治理 | 消息拆分 | `ContextSnapshot` |
-| | 预算裁剪 | `ContextBudgetPolicy` 316L |
-| | 组装 | `ContextAssembler` 104L |
-| | 工具结果摘要化 | `ToolResultContextCompressor` |
-| | Artifact 卸载 | `AbstractAgentExecutor.offloadForMemoryIfNeeded()` |
-| | 按需回填 | `IndexedRehydrateSelector` 388L |
-| | 历史记忆卡片 | `HistoricalContextSummarizer` |
-| 上下文收口 | `agent/context` 10 文件 | assembly 6 + compression 3 + token 1 |
-| 任务态 | `[Task State]` 卡片 | `TaskExecutionState` 等 |
-| 工具 | ShellTool, PythonExecutionTool, BrowserTool 等 | 7 个工具 |
-| AI Framework | OpenAI / Anthropic / Gemini | 三家 Provider |
-| MCP | 工具发现/注册/调用桥接 | `McpClient`, `McpToolRegistryBootstrap` |
+- 前端 Web snapshot 体验迁移。
+- 显式多用户隔离 E2E。
+- 未提交状态治理。
+- 前端 Web 预览体验重构。
+- Shell 命令内容级安全 parser、读命令路径识别和 wrapper/管道/重定向策略。
 
-### 2.3 下一步主线：文件级动态装载
+## 6. 下一期候选计划
 
-**当前基础**：
-- `ShellTool` 可执行 `find/rg/head/tail` 发现文件
-- `IndexedRehydrateSelector` 已有按需回填机制
-- `ContextAssembler` 已有上下文组装能力
-- `ContextBudgetPolicy` 已有预算治理能力
+### 6.1 Shell 命令安全策略
 
-**需要补齐**：
+下一期再统一评估 Shell 命令级校验，重点问题：
 
-| 组件 | 职责 |
-|------|------|
-| `FileContextDiscovery` | 基于 query/任务状态发现候选文件 |
-| `FileFragmentReader` | head/tail/命中片段读取，避免整文件注入 |
-| `DynamicContextInjector` | 统一治理文件片段 + artifact 回填 |
+- 是否需要在 Docker sandbox 之外再做命令内容级 allowlist / denylist。
+- 如何定义“读文件命令”：仅 `cat/head/tail/grep/rg`，还是包含 `sed/awk/find/perl/python/node/cp/tar` 等所有可读文件的入口。
+- 如何处理 wrapper、管道、重定向、命令替换、`xargs`、`find -exec` 等复杂 shell 结构。
+- 如果继续要求“全部 Shell 命令可执行”，是否只保留 `cwd` 校验，把越界读取完全交给 Docker/容器边界处理。
+- 是否需要对 Docker sandbox 增加只读挂载、最小权限、网络/进程限制等硬化措施。
 
-**约束**：
-- 优先复用现有组件
-- 不引入结构化事实记忆、MCP resource 融合、Multi-Agent
+### 6.2 Web snapshot 前端迁移
 
----
+后端已停止产出 `.openmanus/web` snapshot。前端仍保留旧 snapshot 字段用于兼容，后续单独迁移：
 
-## 3. 测试情况
+- 明确 WebFetch 原始正文如何展示。
+- 决定是否需要前端 iframe snapshot、正文预览或仅保留 VNC/browser 视图。
+- 清理 `snapshotPath/snapshotPreview` 兼容字段。
 
-### 3.1 验收口径
+## 7. 验收计划
 
-| 验收项 | 命令 | 状态 |
-|--------|------|------|
-| 编译 | `./scripts/mvnw-local.sh -q -DskipTests compile` | ✅ |
-| 默认测试 | `./scripts/mvnw-local.sh -q -DskipITs test` | ✅ |
-| Smoke 测试 | `./scripts/mvnw-local.sh -q -DskipITs -Dgroups=smoke test` | ✅ |
-| E2E 测试 | `./scripts/mvnw-local.sh -q -DskipITs -Dgroups=e2e test` | ✅ |
-| Live Smoke | `./scripts/run-live-smoke.sh` | ✅ |
+先跑定向测试：
 
-### 3.2 测试资产
+```bash
+./scripts/mvnw-local.sh -q -Dtest=ToolResultBudgetTest,AgentToolResultBudgetE2ETest,ShellToolSmokeTest,WebFetchToolSmokeTest,SearchToolSmokeTest test
+```
 
-**Smoke 测试 (7 个)**
-- `AgentCoordinatorSmokeTest`
-- `BrowserToolSmokeTest`
-- `ShellToolSmokeTest`
-- `PythonExecutionToolSmokeTest`
-- `TaskReflectionToolSmokeTest`
-- `SearchToolSmokeTest`
-- `WebFetchToolSmokeTest`
+再跑编译：
 
-**E2E 测试 (3 个)**
-- `AgentChatApiE2ETest`
-- `ExecutionStreamApiE2ETest`
-- `SessionApiE2ETest`
+```bash
+./scripts/mvnw-local.sh -q -DskipTests compile
+```
 
----
+最后跑默认回归：
 
-## 4. 暂不进入的范围
+```bash
+./scripts/mvnw-local.sh -q -DskipITs test
+```
 
-- 结构化事实记忆
-- MCP resource 融合
-- Multi-Agent / 子任务上下文分治
+全仓验收扫描：
+
+```bash
+rg -n "FileRead|fileReadTool|\\.openmanus/web|snapshotPath|snapshotPreview|artifactId|rehydrate|ToolResultContextCompressor|IndexedRehydrate|Tool Result Rehydrated" src/main/java src/test/java src/main/resources docs front
+```
+
+扫描预期：`src/main/java` 与 `src/test/java` 不应再出现模型工具注册、系统提示词或 E2E 调用中的 `FileRead`；`docs/` 可保留 review 依据中的历史问题描述；`front/` 中旧 snapshot UI 兼容字段不阻塞本轮后端收敛。

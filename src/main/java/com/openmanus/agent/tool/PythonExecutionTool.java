@@ -98,12 +98,12 @@ public class PythonExecutionTool {
         if (result.exitCode() == 0) {
             String output = result.stdout().trim();
             if (output.isEmpty()) {
-                return "✅ 执行成功 (无输出)";
+                return "执行成功 (无输出)";
             }
-            return "✅ 执行成功:\n" + output;
+            return "执行成功:\n" + output;
         } else {
             StringBuilder error = new StringBuilder();
-            error.append("❌ 执行失败 (退出码: ").append(result.exitCode()).append(")");
+            error.append("执行失败 (退出码: ").append(result.exitCode()).append(")");
             
             if (!result.stderr().isEmpty()) {
                 error.append("\n错误信息:\n").append(result.stderr());

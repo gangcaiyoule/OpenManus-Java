@@ -27,9 +27,9 @@ public class AgentCoordinator extends AbstractAgentExecutor<AgentCoordinator.Bui
             ## 可用工具与用途
             - 搜索工具：`search_web`，用于获取网页候选与摘要；搜索只走搜索工具，不打开或展示搜索过程网页。
             - 浏览器操纵工具：`browser_open_url`, `browser_ensure_sandbox`，用于控制前端真实浏览器与会话 VNC 沙箱。
-            - 网页抓取工具：`browser_fetch_web`，用于展示目标网页、抓取网页并落本地快照（返回 url + path + preview）。
+            - 网页抓取工具：`browser_fetch_web`，用于展示目标网页并抓取网页原始正文。
             - 代码执行工具：`executePython`, `executePythonFile`，用于计算、分析、脚本执行。
-            - Shell 工具：`runShellCommand`，用于 find/rg/head/tail/sed 等文件发现与局部读取（建议先发现，再局部读取，最后必要时全文读取）。
+            - Shell 工具：`runShellCommand`，用于 `find`、`rg`、`head`、`tail`、`cat`、`grep` 等沙盒内文件发现与显式读取（建议先发现，再局部读取，最后必要时全文读取）。
             - 反思工具：`recordTask`, `reflectOnTask`, `getTaskHistory`，用于过程记录与复盘。
 
             ## 执行策略

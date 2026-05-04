@@ -2,8 +2,8 @@ package com.openmanus.smoke.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.openmanus.aiframework.runtime.AiSandboxCommandResult;
 import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
-import com.openmanus.aiframework.runtime.AiToolResultArtifactStore;
 import com.openmanus.agent.tool.ShellTool;
 import com.openmanus.smoke.SmokeTest;
 import com.openmanus.sandbox.support.SandboxPathResolver;
@@ -16,10 +16,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.slf4j.MDC;
 
 import java.nio.file.Path;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -32,18 +28,18 @@ import static org.mockito.Mockito.eq;
 class ShellToolSmokeTest implements SmokeTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-    private static final String TEST_SESSION_ID = "test-shell-session";
+    private static final String TEST_USER_ID = "001";
 
     @TempDir
     Path tempDir;
 
     private AiSessionSandboxGateway mockGateway;
     private ShellTool shellTool;
-    private InMemoryArtifactStore artifactStore;
 
     @BeforeEach
     void setUp() {
-        MDC.put("sessionId", TEST_SESSION_ID);
+        MDC.put("sessionId", "test-shell-session");
+        MDC.put("userId", TEST_USER_ID);
         mockGateway = mock(AiSessionSandboxGateway.class);
         when(mockGateway.resolveWorkspacePath(anyString(), anyString())).thenAnswer(invocation -> {
             String userPath = invocation.getArgument(1, String.class);
@@ -54,8 +50,7 @@ class ShellToolSmokeTest implements SmokeTest {
             return resolved.toString();
         });
         SandboxPathResolver resolver = new SandboxPathResolver(mockGateway);
-        artifactStore = new InMemoryArtifactStore();
-        shellTool = new ShellTool(mockGateway, resolver, artifactStore, true, 1, 8000);
+        shellTool = new ShellTool(mockGateway, resolver, true, 1);
     }
 
     @AfterEach
@@ -66,8 +61,8 @@ class ShellToolSmokeTest implements SmokeTest {
     @Test
     @DisplayName("should execute shell command and return fixed metadata")
     void runShellCommand_basic_returnsMetadata() throws Exception {
-        when(mockGateway.executeCommand(eq(TEST_SESSION_ID), eq("echo hello"), eq(tempDir.toString()), eq(1)))
-                .thenReturn(new com.openmanus.aiframework.runtime.AiSandboxCommandResult("hello\n", "", 0));
+        when(mockGateway.executeCommand(eq(TEST_USER_ID), eq("echo hello"), eq(tempDir.toString()), eq(1)))
+                .thenReturn(new AiSandboxCommandResult("hello\n", "", 0));
         String result = shellTool.runShellCommand("echo hello", null, "memory-1");
         JsonNode node = MAPPER.readTree(result);
         assertThat(node.get("command").asText()).isEqualTo("echo hello");
@@ -88,39 +83,58 @@ class ShellToolSmokeTest implements SmokeTest {
     }
 
     @Test
-    @DisplayName("should offload long output and return artifactId + preview")
-    void runShellCommand_longOutput_offloads() throws Exception {
-        String cmd = "dd if=/dev/zero bs=1 count=9000 2>/dev/null | tr '\\\\0' 'a'";
-        when(mockGateway.executeCommand(eq(TEST_SESSION_ID), eq(cmd), eq(tempDir.toString()), eq(1)))
-                .thenReturn(new com.openmanus.aiframework.runtime.AiSandboxCommandResult("a".repeat(9000), "", 0));
+    @DisplayName("should return raw long output and leave budgeting to executor")
+    void runShellCommand_longOutput_returnsRaw() throws Exception {
+        String cmd = "printf long-output";
+        when(mockGateway.executeCommand(eq(TEST_USER_ID), eq(cmd), eq(tempDir.toString()), eq(1)))
+                .thenReturn(new AiSandboxCommandResult("a".repeat(9000), "", 0));
         String result = shellTool.runShellCommand(cmd, null, "memory-3");
         JsonNode node = MAPPER.readTree(result);
         assertThat(node.get("exitCode").asInt()).isEqualTo(0);
-        assertThat(node.get("truncated").asBoolean()).isTrue();
-        assertThat(node.get("artifactId").asText()).isNotBlank();
-        assertThat(node.get("preview").asText()).contains("[Shell Output]");
-
-        Optional<String> full = artifactStore.load(node.get("artifactId").asText());
-        assertThat(full).isPresent();
-        assertThat(full.get()).contains("--- stdout ---");
-        assertThat(full.get().length()).isGreaterThan(8000);
+        assertThat(node.get("truncated").asBoolean()).isFalse();
+        assertThat(node.has("artifact" + "Id")).isFalse();
+        assertThat(node.get("stdout").asText()).hasSize(9000);
     }
 
-    private static final class InMemoryArtifactStore implements AiToolResultArtifactStore {
-
-        private final AtomicInteger seq = new AtomicInteger(0);
-        private final Map<String, String> store = new ConcurrentHashMap<>();
-
-        @Override
-        public String save(Object memoryId, String toolName, String toolArguments, String outcome) {
-            String id = toolName + "-" + seq.incrementAndGet();
-            store.put(id, outcome);
-            return id;
-        }
-
-        @Override
-        public Optional<String> load(String artifactId) {
-            return Optional.ofNullable(store.get(artifactId));
-        }
+    @Test
+    @DisplayName("should keep shell syntax executable")
+    void runShellCommand_shellSyntax_executes() throws Exception {
+        assertAllowed("echo hello > out.txt");
+        assertAllowed("printf ok && echo done");
+        assertAllowed("echo $(pwd)");
     }
+
+    @Test
+    @DisplayName("should execute common read commands without command-level rejection")
+    void runShellCommand_readCommands_executeInSandbox() throws Exception {
+        assertAllowed("cat file.txt");
+        assertAllowed("head -n 5 file.txt");
+        assertAllowed("tail -n 5 file.txt");
+        assertAllowed("grep pattern file.txt");
+        assertAllowed("rg pattern dir");
+    }
+
+    @Test
+    @DisplayName("should execute complex read commands in docker sandbox")
+    void runShellCommand_complexReadCommands_executeInSandbox() throws Exception {
+        assertAllowed("cat /etc/passwd");
+        assertAllowed("grep x ../outside.txt");
+        assertAllowed("cat file.txt; cat /etc/passwd");
+        assertAllowed("cat $(pwd)/file.txt");
+        assertAllowed("echo $(cat /etc/passwd)");
+        assertAllowed("cat `pwd`/file.txt");
+        assertAllowed("cat file.txt > out.txt");
+        assertAllowed("printf /etc/passwd | xargs cat");
+        assertAllowed("sh -c 'cat /etc/passwd'");
+    }
+
+    private void assertAllowed(String command) throws Exception {
+        when(mockGateway.executeCommand(eq(TEST_USER_ID), eq(command), eq(tempDir.toString()), eq(1)))
+                .thenReturn(new AiSandboxCommandResult("ok\n", "", 0));
+        String result = shellTool.runShellCommand(command, null, "memory-read");
+        JsonNode node = MAPPER.readTree(result);
+        assertThat(node.get("exitCode").asInt()).isEqualTo(0);
+        assertThat(node.get("stdout").asText()).contains("ok");
+    }
+
 }

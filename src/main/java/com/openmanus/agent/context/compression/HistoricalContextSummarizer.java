@@ -18,7 +18,6 @@ public final class HistoricalContextSummarizer {
 
     private static final int MAX_SUMMARY_CHARS = 120;
     private static final int MAX_TOOL_ITEMS = 2;
-    private static final Pattern ARTIFACT_ID_PATTERN = Pattern.compile("artifactId=([^\\s]+)");
     private static final Pattern TOOL_NAME_PATTERN = Pattern.compile("tool=([^\\s]+)");
 
     public List<AiChatMessage> inject(List<AiChatMessage> originalHistory, List<AiChatMessage> retainedHistory) {
@@ -161,14 +160,10 @@ public final class HistoricalContextSummarizer {
         }
 
         String toolName = extractPatternGroup(content, TOOL_NAME_PATTERN);
-        String artifactId = extractPatternGroup(content, ARTIFACT_ID_PATTERN);
         String summary = normalizeContent(content);
         List<String> parts = new ArrayList<>();
         if (toolName != null) {
             parts.add("tool=" + toolName);
-        }
-        if (artifactId != null) {
-            parts.add("artifactId=" + artifactId);
         }
         if (summary != null) {
             parts.add("detail=" + summary);

@@ -68,10 +68,10 @@ class SearchToolSmokeTest implements SmokeTest {
     void searchWeb_returnsResults() {
         String result = searchTool.searchWeb("test query");
         assertThat(result)
-                .contains("🔍 搜索结果: test query")
+                .contains("搜索结果: test query")
                 .contains("1. **Local Result**")
-                .contains("🔗 http://example.local")
-                .contains("📝 AI agent local smoke result");
+                .contains("Link: http://example.local")
+                .contains("Snippet: AI agent local smoke result");
         verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("SEARCH_STARTED")));
         verify(mockExecutionEventPort).recordCustomEvent(argThat(event -> event.getEventType().name().equals("SEARCH_RESULTS_READY")));
         verify(mockGateway, never()).openBrowserUrl(anyString(), anyString());
@@ -86,20 +86,30 @@ class SearchToolSmokeTest implements SmokeTest {
         assertThat(result).contains("https://www.google.com/search?q=");
     }
 
+    @Test
+    @DisplayName("searchWeb should not trim long snippets before executor budget")
+    void searchWeb_longSnippet_returnsRawResult() {
+        String result = searchTool.searchWeb("long query");
+        assertThat(result).contains("LONG_SNIPPET_START");
+        assertThat(result).contains("s".repeat(8500));
+        assertThat(result).doesNotContain("结果已截断");
+    }
+
     private void startTestServer() throws Exception {
         testServer = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         testServer.createContext("/search", exchange -> {
+            String longSnippet = "LONG_SNIPPET_START " + "s".repeat(9000) + " LONG_SNIPPET_END";
             String response = """
                     {
                       "organic": [
                         {
                           "title": "Local Result",
                           "link": "http://example.local",
-                          "snippet": "AI agent local smoke result"
+                          "snippet": "AI agent local smoke result %s"
                         }
                       ]
                     }
-                    """;
+                    """.formatted(longSnippet);
             byte[] bytes = response.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
             exchange.sendResponseHeaders(200, bytes.length);

@@ -17,6 +17,7 @@ public class ConversationApplicationService {
     private static final String EXECUTION_START = "EXECUTION_START";
     private static final String EXECUTION_COMPLETE = "EXECUTION_COMPLETE";
     private static final String EXECUTION_ERROR = "EXECUTION_ERROR";
+    private static final String DEFAULT_USER_ID = "001";
 
     private final AgentExecutionPort agentExecutionPort;
     private final ExecutionEventPort executionEventPort;
@@ -37,6 +38,7 @@ public class ConversationApplicationService {
      */
     public CompletableFuture<Map<String, Object>> chat(String message, String conversationId, boolean sync) {
         final String sessionId = normalizeSessionId(conversationId);
+        final String userId = currentUserId();
 
         if (message == null || message.trim().isEmpty()) {
             Map<String, Object> errorResult = new HashMap<>();
@@ -48,7 +50,8 @@ public class ConversationApplicationService {
         if (sync) {
             return CompletableFuture.completedFuture(executeSyncWithMonitoring(message, sessionId));
         } else {
-            try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", sessionId)) {
+            try (MDC.MDCCloseable ignoredSession = MDC.putCloseable("sessionId", sessionId);
+                 MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", userId)) {
                 startMonitoring(sessionId, message);
                 CompletableFuture<String> executionFuture = agentExecutionPort.execute(message, sessionId);
                 return executionFuture
@@ -63,7 +66,8 @@ public class ConversationApplicationService {
     }
 
     private Map<String, Object> executeSyncWithMonitoring(String message, String sessionId) {
-        try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", sessionId)) {
+        try (MDC.MDCCloseable ignoredSession = MDC.putCloseable("sessionId", sessionId);
+             MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", currentUserId())) {
             startMonitoring(sessionId, message);
             String response = agentExecutionPort.executeSync(message, sessionId);
             return completeSuccess(sessionId, response);
@@ -145,5 +149,10 @@ public class ConversationApplicationService {
 
     static String normalizeSessionId(String rawConversationId) {
         return SessionIdPolicy.normalizeOrGenerate(rawConversationId);
+    }
+
+    private static String currentUserId() {
+        String userId = MDC.get("userId");
+        return userId == null || userId.isBlank() ? DEFAULT_USER_ID : userId;
     }
 }

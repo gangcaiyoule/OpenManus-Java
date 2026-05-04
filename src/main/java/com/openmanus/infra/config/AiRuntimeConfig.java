@@ -7,14 +7,9 @@ import com.openmanus.aiframework.runtime.AiChatModel;
 import com.openmanus.aiframework.runtime.AiMemoryProvider;
 import com.openmanus.aiframework.runtime.AiMemoryStore;
 import com.openmanus.aiframework.runtime.AiProviderChatModel;
-import com.openmanus.aiframework.runtime.AiToolResultArtifactStore;
 import com.openmanus.infra.memory.FileChatMemoryStore;
-import com.openmanus.infra.memory.FileToolResultArtifactStore;
 import com.openmanus.infra.memory.InMemoryAiMemoryStore;
-import com.openmanus.infra.memory.InMemoryToolResultArtifactStore;
 import com.openmanus.infra.memory.PersistentAiMemory;
-import com.openmanus.infra.memory.RuntimeToolResultArtifactStoreAdapter;
-import com.openmanus.infra.memory.ToolResultArtifactStore;
 import java.nio.file.Path;
 import java.util.Locale;
 import org.springframework.context.annotation.Bean;
@@ -61,40 +56,6 @@ public class AiRuntimeConfig {
         OpenManusProperties.ChatMemoryConfig.DEFAULT_FILE_STORE_DIR
     );
     return new FileChatMemoryStore(dir, cfg.getRetentionDays(), cfg.isQuarantineCorruptedFiles());
-  }
-
-  /**
-   * Tool-result artifact store.
-   */
-  @Bean
-  public ToolResultArtifactStore toolResultArtifactStore() {
-    OpenManusProperties.ChatMemoryConfig cfg = properties.getChatMemory();
-    String storeType = (cfg.getStoreType() == null || cfg.getStoreType().trim().isEmpty())
-        ? "file"
-        : cfg.getStoreType().trim().toLowerCase(Locale.ROOT);
-    if ("in-memory".equals(storeType) || "inmemory".equals(storeType)) {
-      return new InMemoryToolResultArtifactStore(
-          cfg.getToolResultArtifactMaxIndexEntriesPerMemory());
-    }
-    if (!"file".equals(storeType)) {
-      throw new IllegalArgumentException(
-          "Unsupported chat-memory.store-type: " + cfg.getStoreType());
-    }
-    Path dir = resolveDirectory(
-        cfg.getToolResultArtifactStoreDir(),
-        OpenManusProperties.ChatMemoryConfig.DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR
-    );
-    return new FileToolResultArtifactStore(
-        dir,
-        cfg.getToolResultArtifactMaxIndexEntriesPerMemory());
-  }
-
-  /**
-   * Runtime abstraction for tool-result artifact store.
-   */
-  @Bean
-  public AiToolResultArtifactStore aiToolResultArtifactStore(ToolResultArtifactStore store) {
-    return new RuntimeToolResultArtifactStoreAdapter(store);
   }
 
   /**
