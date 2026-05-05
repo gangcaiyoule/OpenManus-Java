@@ -21,10 +21,14 @@ import org.springframework.stereotype.Component;
 public class FrontendDevServerLifecycle {
 
   private static final Logger log = LoggerFactory.getLogger(FrontendDevServerLifecycle.class);
-  private static final String DEV_SERVER_URL = "http://127.0.0.1:5173";
   private static final Duration PROBE_TIMEOUT = Duration.ofMillis(500);
 
+  private final OpenManusProperties properties;
   private Process process;
+
+  public FrontendDevServerLifecycle(OpenManusProperties properties) {
+    this.properties = properties;
+  }
 
   /**
    * Starts Vite after Spring is ready so the backend can proxy frontend requests on 8089.
@@ -36,19 +40,27 @@ public class FrontendDevServerLifecycle {
       log.info("Front directory not found, skipping frontend dev server startup: {}", frontDir);
       return;
     }
-    if (isDevServerReady()) {
-      log.info("Frontend dev server already running at {}", DEV_SERVER_URL);
+    URI devServerUri = resolveDevServerUri();
+    if (devServerUri == null) {
+      log.warn("Invalid frontend dev server URL: {}", properties.getFrontend().getDevServerUrl());
+      return;
+    }
+    if (isDevServerReady(devServerUri)) {
+      log.info("Frontend dev server already running at {}", devServerUri);
       return;
     }
 
     try {
       process = new ProcessBuilder(List.of(
-          "npm", "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"
+          "npm", "run", "dev", "--",
+          "--host", devServerUri.getHost(),
+          "--port", Integer.toString(resolvePort(devServerUri)),
+          "--strictPort"
       ))
           .directory(frontDir.toFile())
           .inheritIO()
           .start();
-      log.info("Started frontend dev server from {}", frontDir);
+      log.info("Started frontend dev server from {} at {}", frontDir, devServerUri);
     } catch (IOException e) {
       log.warn("Failed to start frontend dev server from {}", frontDir, e);
     }
@@ -66,9 +78,9 @@ public class FrontendDevServerLifecycle {
     log.info("Stopped frontend dev server");
   }
 
-  private static boolean isDevServerReady() {
+  private static boolean isDevServerReady(URI devServerUri) {
     try {
-      HttpURLConnection connection = (HttpURLConnection) URI.create(DEV_SERVER_URL)
+      HttpURLConnection connection = (HttpURLConnection) devServerUri
           .toURL()
           .openConnection();
       connection.setConnectTimeout((int) PROBE_TIMEOUT.toMillis());
@@ -78,5 +90,28 @@ public class FrontendDevServerLifecycle {
     } catch (IOException e) {
       return false;
     }
+  }
+
+  private URI resolveDevServerUri() {
+    String configured = properties.getFrontend().getDevServerUrl();
+    if (configured == null || configured.isBlank()) {
+      return URI.create("http://127.0.0.1:5173");
+    }
+    try {
+      URI uri = URI.create(configured);
+      if (uri.getScheme() == null || uri.getHost() == null) {
+        return null;
+      }
+      return uri;
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private static int resolvePort(URI uri) {
+    if (uri.getPort() > 0) {
+      return uri.getPort();
+    }
+    return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
   }
 }

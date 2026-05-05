@@ -134,7 +134,7 @@ To keep the ReAct loop running while controlling context growth, adjust `openman
 - **Control model input size**  
   Use both message windows (`model-context-max-messages`, `model-context-max-total-messages`) and token budget (`model-context-max-approx-tokens`).
 - **Handle large tool outputs**  
-  Use lossless offload (`tool-result-offload-enabled`) + on-demand rehydrate (`tool-result-rehydrate-enabled`).
+  Use tool-result budgeting (`tool-result-budget-enabled`) so oversized tool outputs are written to sandbox files and replaced with explicit stubs before the next model round.
 
 Suggested presets:
 
@@ -146,8 +146,7 @@ openmanus:
     model-context-max-total-messages: 0
     model-context-max-approx-tokens: 0
     react-max-iterations: 0
-    tool-result-offload-enabled: false
-    tool-result-rehydrate-enabled: false
+    tool-result-budget-enabled: false
 ```
 
 ```yaml
@@ -160,11 +159,11 @@ openmanus:
     react-max-iterations: 0
     react-max-execution-seconds: 600
     react-repeated-tool-call-threshold: 8
-    tool-result-offload-enabled: true
-    tool-result-offload-min-chars: 12000
-    tool-result-rehydrate-enabled: true
-    tool-result-rehydrate-max-chars: 8000
-    tool-result-rehydrate-max-per-round: 2
+    tool-result-budget-enabled: true
+    tool-result-budget-min-chars: 12000
+    tool-result-budget-preview-head-chars: 240
+    tool-result-budget-preview-tail-chars: 160
+    tool-result-budget-decay-chars: 0
 ```
 
 ```yaml
@@ -177,11 +176,11 @@ openmanus:
     react-max-iterations: 0
     react-max-execution-seconds: 300
     react-repeated-tool-call-threshold: 6
-    tool-result-offload-enabled: true
-    tool-result-offload-min-chars: 8000
-    tool-result-rehydrate-enabled: true
-    tool-result-rehydrate-max-chars: 4000
-    tool-result-rehydrate-max-per-round: 1
+    tool-result-budget-enabled: true
+    tool-result-budget-min-chars: 8000
+    tool-result-budget-preview-head-chars: 200
+    tool-result-budget-preview-tail-chars: 120
+    tool-result-budget-decay-chars: 0
 ```
 
 ## 📊 Usage

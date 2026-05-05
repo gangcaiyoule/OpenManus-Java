@@ -65,6 +65,12 @@ public class OpenManusProperties {
      */
     @NestedConfigurationProperty
     private WebProxyConfig webProxy = new WebProxyConfig();
+
+    /**
+     * Frontend runtime configuration.
+     */
+    @NestedConfigurationProperty
+    private FrontendConfig frontend = new FrontendConfig();
     
     /**
      * Runflow configuration
@@ -225,6 +231,15 @@ public class OpenManusProperties {
                 if (!isBlank(allowedOrigins)) {
                     webProxy.setAllowedOrigins(parseCsvList(allowedOrigins));
                 }
+            }
+        }
+
+        if (frontend != null
+                && (isBlank(frontend.getDevServerUrl())
+                || FrontendConfig.DEFAULT_DEV_SERVER_URL.equals(frontend.getDevServerUrl()))) {
+            String devServerUrl = firstNonBlankEnv("OPENMANUS_FRONTEND_DEV_SERVER_URL");
+            if (!isBlank(devServerUrl)) {
+                frontend.setDevServerUrl(devServerUrl);
             }
         }
 
@@ -647,6 +662,19 @@ public class OpenManusProperties {
         public boolean isEnabled() {
             return Boolean.TRUE.equals(enabled);
         }
+    }
+
+    /**
+     * Frontend runtime configuration.
+     */
+    @Data
+    public static class FrontendConfig {
+        private static final String DEFAULT_DEV_SERVER_URL = "http://127.0.0.1:5173";
+
+        /**
+         * URL of the local Vite dev server used during development.
+         */
+        private String devServerUrl = DEFAULT_DEV_SERVER_URL;
     }
     
     /**

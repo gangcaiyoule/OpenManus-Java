@@ -135,7 +135,7 @@ graph TD
 - **控制模型输入体积**  
   同时使用消息窗口（`model-context-max-messages`、`model-context-max-total-messages`）和近似 token 预算（`model-context-max-approx-tokens`）。
 - **处理超大工具结果**  
-  开启无损卸载（`tool-result-offload-enabled`）+ 按需回填（`tool-result-rehydrate-enabled`）。
+  开启工具结果预算（`tool-result-budget-enabled`），在下一轮模型调用前把超大输出写入沙盒文件，并用可显式读取的 stub 替换。
 
 建议三档参数：
 
@@ -147,8 +147,7 @@ openmanus:
     model-context-max-total-messages: 0
     model-context-max-approx-tokens: 0
     react-max-iterations: 0
-    tool-result-offload-enabled: false
-    tool-result-rehydrate-enabled: false
+    tool-result-budget-enabled: false
 ```
 
 ```yaml
@@ -161,11 +160,11 @@ openmanus:
     react-max-iterations: 0
     react-max-execution-seconds: 600
     react-repeated-tool-call-threshold: 8
-    tool-result-offload-enabled: true
-    tool-result-offload-min-chars: 12000
-    tool-result-rehydrate-enabled: true
-    tool-result-rehydrate-max-chars: 8000
-    tool-result-rehydrate-max-per-round: 2
+    tool-result-budget-enabled: true
+    tool-result-budget-min-chars: 12000
+    tool-result-budget-preview-head-chars: 240
+    tool-result-budget-preview-tail-chars: 160
+    tool-result-budget-decay-chars: 0
 ```
 
 ```yaml
@@ -178,11 +177,11 @@ openmanus:
     react-max-iterations: 0
     react-max-execution-seconds: 300
     react-repeated-tool-call-threshold: 6
-    tool-result-offload-enabled: true
-    tool-result-offload-min-chars: 8000
-    tool-result-rehydrate-enabled: true
-    tool-result-rehydrate-max-chars: 4000
-    tool-result-rehydrate-max-per-round: 1
+    tool-result-budget-enabled: true
+    tool-result-budget-min-chars: 8000
+    tool-result-budget-preview-head-chars: 200
+    tool-result-budget-preview-tail-chars: 120
+    tool-result-budget-decay-chars: 0
 ```
 
 ## 📊 使用方式

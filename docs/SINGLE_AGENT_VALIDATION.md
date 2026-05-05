@@ -5,10 +5,10 @@ This document validates the migration from multi-agent handoff architecture to a
 ## Scope
 
 - One executor loop: `UnifiedAgent extends AbstractAgentExecutor`.
-- One workflow core: `UnifiedWorkflow`.
+- One workflow core: `AgentExecutionService` plus `ExecutionStreamingApplicationService`.
 - Unified tool mounting: browser/file/python/reflection tools are directly mounted on `UnifiedAgent`.
-- Session memory continuity: `PersistentChatMemory` backed by `FileChatMemoryStore`.
-- Sandbox enforcement: file and python-file operations are constrained by `SessionSandboxManager`.
+- Session memory continuity: runtime-first `AiMemory` backed by `FileChatMemoryStore` or `InMemoryAiMemoryStore`.
+- Sandbox enforcement: file, shell, and Python execution are constrained by `AiSessionSandboxGateway` and sandbox adapters.
 
 ## Prerequisites
 
@@ -48,16 +48,15 @@ Expected:
 ## 3) Run migration regression tests
 
 ```bash
-./scripts/mvnw-local.sh -q -Dtest=SingleAgentArchitectureGuardTest,ValidationScriptsConsistencyTest,MvnwLocalScriptIntegrationTest,UnifiedWorkflowTest,AgentControllerStreamEndpointTest,AgentControllerServiceContractTest,AgentServiceConversationMemoryTest,WorkflowStreamServiceSessionMemoryTest,FileToolSandboxTest,PythonToolSandboxPathTest,LangChain4jConfigChatMemoryTest test
+./scripts/mvnw-local.sh -q test
 ```
 
 Expected:
-- `AgentServiceConversationMemoryTest`: conversation id is forwarded; mode is `unified`; MDC session id is bound.
-- `UnifiedWorkflowTest`: null/blank input is rejected before agent execution; conversation id is forwarded as memory id.
-- `WorkflowStreamServiceSessionMemoryTest`: session id is forwarded to unified workflow memory.
-- `FileToolSandboxTest`: read/write works in session sandbox; `../` traversal is blocked; files are isolated across sessions.
-- `PythonToolSandboxPathTest`: python file is read from session sandbox; traversal is blocked.
-- `LangChain4jConfigChatMemoryTest`: same conversation id keeps message history across provider fetches.
+- `AgentCoordinatorSmokeTest`: runtime-first single-agent loop handles tool planning and execution.
+- `AgentToolResultBudgetE2ETest`: large tool outputs are written to sandbox files and replaced with explicit stubs.
+- `PythonExecutionToolSmokeTest`: Python execution remains sandboxed and failure paths are handled.
+- `SearchToolSmokeTest`, `ShellToolSmokeTest`, `WebFetchToolSmokeTest`: core toolchain remains available after the migration.
+- `AgentControllerSessionSandboxStartTest` and `WebProxyControllerTest`: web entrypoints stay consistent with the new infra/web architecture.
 - `AgentControllerStreamEndpointTest`: unified streaming endpoint is available; removed legacy path returns `404`; unified endpoint keeps stable error mapping behavior.
 - `AgentControllerServiceContractTest`: verifies real service->controller contract for `errorCode -> HTTP status` (`400/503/500`) on unified path, including `INTERNAL_ERROR -> 500` (listener-registration failure), verifies that `errorCode` takes precedence over legacy `error` message when both exist but conflict, and additionally verifies controller fallback mapping for `UNKNOWN_ERROR -> 500`.
 - `SingleAgentArchitectureGuardTest`: legacy multi-agent classes/config/workflow remain absent.
