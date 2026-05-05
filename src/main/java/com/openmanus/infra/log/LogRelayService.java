@@ -19,9 +19,6 @@ import java.util.Map;
 @Slf4j
 @Service
 public class LogRelayService {
-
-    private static volatile LogRelayService instance;
-    
     private final SimpMessagingTemplate messagingTemplate;
 
     public LogRelayService(SimpMessagingTemplate messagingTemplate) {
@@ -30,12 +27,8 @@ public class LogRelayService {
 
     @PostConstruct
     public void init() {
-        instance = this;
+        LogRelayBridge.register(this);
         log.info("LogRelayService initialized");
-    }
-
-    public static LogRelayService getInstance() {
-        return instance;
     }
 
     /**

@@ -6,14 +6,18 @@ import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.annotation.PostConstruct;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
  * OpenManus Configuration Properties
  *
  * Centralized configuration management for OpenManus project
- * Supports configuration from application.yml and environment variables
+ * Supports configuration from Spring config files and environment variables
  */
 @Data
 @Slf4j
@@ -55,6 +59,12 @@ public class OpenManusProperties {
      */
     @NestedConfigurationProperty
     private SearchConfig search = new SearchConfig();
+
+    /**
+     * Web proxy exposure configuration.
+     */
+    @NestedConfigurationProperty
+    private WebProxyConfig webProxy = new WebProxyConfig();
     
     /**
      * Runflow configuration
@@ -69,6 +79,12 @@ public class OpenManusProperties {
     private ChatMemoryConfig chatMemory = new ChatMemoryConfig();
 
     /**
+     * MCP runtime configuration.
+     */
+    @NestedConfigurationProperty
+    private McpConfig mcp = new McpConfig();
+
+    /**
      * Legacy mapping logging configuration.
      */
     @NestedConfigurationProperty
@@ -76,7 +92,40 @@ public class OpenManusProperties {
 
     @PostConstruct
     void applyEnvFallbacks() {
+        if (app != null) {
+            String defaultUserId = firstNonBlankEnv(
+                    "OPENMANUS_APP_DEFAULT_USER_ID",
+                    "OPENMANUS_APP_DEFAULTUSERID",
+                    "USER_ID"
+            );
+            if (!isBlank(defaultUserId)) {
+                app.setDefaultUserId(defaultUserId);
+            }
+        }
+
         if (llm != null && llm.getDefaultLlm() != null) {
+            if (isBlank(llm.getDefaultLlm().getApiType())) {
+                String apiType = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_API_TYPE",
+                        "OPENMANUS_LLM_DEFAULTLLM_APITYPE",
+                        "OPENAI_API_TYPE"
+                );
+                if (!isBlank(apiType)) {
+                    llm.getDefaultLlm().setApiType(apiType);
+                }
+            }
+
+            if (isBlank(llm.getDefaultLlm().getBaseUrl())) {
+                String baseUrl = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_BASE_URL",
+                        "OPENMANUS_LLM_DEFAULTLLM_BASEURL",
+                        "OPENAI_BASE_URL"
+                );
+                if (!isBlank(baseUrl)) {
+                    llm.getDefaultLlm().setBaseUrl(baseUrl);
+                }
+            }
+
             String apiKey = llm.getDefaultLlm().getApiKey();
             if (isBlank(apiKey)) {
                 String envKey = firstNonBlankEnv(
@@ -88,11 +137,22 @@ public class OpenManusProperties {
                     llm.getDefaultLlm().setApiKey(envKey);
                 }
             }
+
+            if (isBlank(llm.getDefaultLlm().getModel())) {
+                String model = firstNonBlankEnv(
+                        "OPENMANUS_LLM_DEFAULT_LLM_MODEL",
+                        "OPENMANUS_LLM_DEFAULTLLM_MODEL",
+                        "OPENAI_MODEL"
+                );
+                if (!isBlank(model)) {
+                    llm.getDefaultLlm().setModel(model);
+                }
+            }
         }
 
         if (search != null) {
             String apiKey = search.getApiKey();
-            if (isBlank(apiKey)) {
+            if (isBlank(apiKey) || isPlaceholder(apiKey)) {
                 String envKey = firstNonBlankEnv(
                         "OPENMANUS_SEARCH_API_KEY",
                         "OPENMANUS_SEARCH_APIKEY",
@@ -105,11 +165,74 @@ public class OpenManusProperties {
             }
         }
 
+        if (sandbox != null) {
+            String image = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_IMAGE"
+            );
+            if (!isBlank(image)) {
+                sandbox.setImage(image);
+            }
+
+            String workDir = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_WORK_DIR",
+                    "OPENMANUS_SANDBOX_WORKDIR"
+            );
+            if (!isBlank(workDir)) {
+                sandbox.setWorkDir(workDir);
+            }
+
+            String memoryLimit = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_MEMORY_LIMIT",
+                    "OPENMANUS_SANDBOX_MEMORYLIMIT"
+            );
+            if (!isBlank(memoryLimit)) {
+                sandbox.setMemoryLimit(memoryLimit);
+            }
+
+            String cpuLimit = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_CPU_LIMIT",
+                    "OPENMANUS_SANDBOX_CPULIMIT"
+            );
+            if (!isBlank(cpuLimit)) {
+                sandbox.setCpuLimit(parsePositiveDouble(cpuLimit, sandbox.getCpuLimit()));
+            }
+
+            String timeout = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_TIMEOUT"
+            );
+            if (!isBlank(timeout)) {
+                sandbox.setTimeout(parsePositiveInt(timeout, sandbox.getTimeout()));
+            }
+
+            String networkEnabled = firstNonBlankEnv(
+                    "OPENMANUS_SANDBOX_NETWORK_ENABLED",
+                    "OPENMANUS_SANDBOX_NETWORKENABLED"
+            );
+            if (!isBlank(networkEnabled)) {
+                sandbox.setNetworkEnabled(parseBooleanStrict(networkEnabled, sandbox.isNetworkEnabled()));
+            }
+        }
+
+        if (webProxy != null) {
+            if (webProxy.enabled == null) {
+                String enabled = firstNonBlankEnv("OPENMANUS_WEB_PROXY_ENABLED");
+                if (!isBlank(enabled)) {
+                    webProxy.setEnabled(parseBooleanStrict(enabled, webProxy.isEnabled()));
+                }
+            }
+            if (webProxy.allowedOrigins == null || webProxy.allowedOrigins.isEmpty()) {
+                String allowedOrigins = firstNonBlankEnv("OPENMANUS_WEB_PROXY_ALLOWED_ORIGINS");
+                if (!isBlank(allowedOrigins)) {
+                    webProxy.setAllowedOrigins(parseCsvList(allowedOrigins));
+                }
+            }
+        }
+
         if (chatMemory != null) {
             if (isBlank(chatMemory.getStoreType())) {
                 String storeType = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_STORE_TYPE");
                 if (!isBlank(storeType)) {
-                    chatMemory.setStoreType(storeType.trim().toLowerCase());
+                    chatMemory.setStoreType(storeType.trim().toLowerCase(Locale.ROOT));
                 }
             }
             if (shouldApplyChatMemoryFileStoreDirFallback(chatMemory)) {
@@ -132,26 +255,6 @@ public class OpenManusProperties {
                 if (!isBlank(quarantine)) {
                     chatMemory.setQuarantineCorruptedFiles(parseBooleanStrict(
                             quarantine, chatMemory.isQuarantineCorruptedFiles()));
-                }
-            }
-            if (chatMemory.toolResultMaxChars == null) {
-                String maxToolResultChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_MAX_CHARS");
-                if (!isBlank(maxToolResultChars)) {
-                    chatMemory.setToolResultMaxChars(parsePositiveInt(maxToolResultChars, chatMemory.getToolResultMaxChars()));
-                }
-            }
-            if (chatMemory.compactToolResultHeadChars == null) {
-                String compactHeadChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_HEAD_CHARS");
-                if (!isBlank(compactHeadChars)) {
-                    chatMemory.setCompactToolResultHeadChars(parsePositiveInt(
-                            compactHeadChars, chatMemory.getCompactToolResultHeadChars()));
-                }
-            }
-            if (chatMemory.compactToolResultTailChars == null) {
-                String compactTailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_TAIL_CHARS");
-                if (!isBlank(compactTailChars)) {
-                    chatMemory.setCompactToolResultTailChars(parsePositiveInt(
-                            compactTailChars, chatMemory.getCompactToolResultTailChars()));
                 }
             }
             if (chatMemory.modelContextMaxMessages == null) {
@@ -177,11 +280,11 @@ public class OpenManusProperties {
                             approxTokens, chatMemory.getModelContextMaxApproxTokens()));
                 }
             }
-            if (chatMemory.compactToolResultsEnabled == null) {
-                String compactEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_COMPACT_TOOL_RESULTS_ENABLED");
-                if (!isBlank(compactEnabled)) {
-                    chatMemory.setCompactToolResultsEnabled(parseBooleanStrict(
-                            compactEnabled, chatMemory.isCompactToolResultsEnabled()));
+            if (isBlank(chatMemory.getModelContextTokenCountModeRaw())) {
+                String countMode = firstNonBlankEnv(
+                        "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE");
+                if (!isBlank(countMode)) {
+                    chatMemory.setModelContextTokenCountMode(countMode);
                 }
             }
             if (chatMemory.reactMaxIterations == null) {
@@ -206,72 +309,100 @@ public class OpenManusProperties {
                             threshold, chatMemory.getReactRepeatedToolCallThreshold()));
                 }
             }
-            if (chatMemory.toolResultOffloadEnabled == null) {
-                String offloadEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_ENABLED");
-                if (!isBlank(offloadEnabled)) {
-                    chatMemory.setToolResultOffloadEnabled(parseBooleanStrict(
-                            offloadEnabled, chatMemory.isToolResultOffloadEnabled()));
+            if (chatMemory.taskStatePlanMaxChars == null) {
+                String planMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_PLAN_MAX_CHARS");
+                if (!isBlank(planMaxChars)) {
+                    chatMemory.setTaskStatePlanMaxChars(parsePositiveInt(
+                            planMaxChars, chatMemory.getTaskStatePlanMaxChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadMinChars == null) {
-                String offloadMinChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_MIN_CHARS");
-                if (!isBlank(offloadMinChars)) {
-                    chatMemory.setToolResultOffloadMinChars(parsePositiveInt(
-                            offloadMinChars, chatMemory.getToolResultOffloadMinChars()));
+            if (chatMemory.taskStateInProgressMaxChars == null) {
+                String inProgressMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_IN_PROGRESS_MAX_CHARS");
+                if (!isBlank(inProgressMaxChars)) {
+                    chatMemory.setTaskStateInProgressMaxChars(parsePositiveInt(
+                            inProgressMaxChars, chatMemory.getTaskStateInProgressMaxChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadHeadChars == null) {
-                String offloadHeadChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_HEAD_CHARS");
-                if (!isBlank(offloadHeadChars)) {
-                    chatMemory.setToolResultOffloadHeadChars(parsePositiveInt(
-                            offloadHeadChars, chatMemory.getToolResultOffloadHeadChars()));
+            if (chatMemory.taskStateLastFailureMaxChars == null) {
+                String lastFailureMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_LAST_FAILURE_MAX_CHARS");
+                if (!isBlank(lastFailureMaxChars)) {
+                    chatMemory.setTaskStateLastFailureMaxChars(parsePositiveInt(
+                            lastFailureMaxChars, chatMemory.getTaskStateLastFailureMaxChars()));
                 }
             }
-            if (chatMemory.toolResultOffloadTailChars == null) {
-                String offloadTailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_OFFLOAD_TAIL_CHARS");
-                if (!isBlank(offloadTailChars)) {
-                    chatMemory.setToolResultOffloadTailChars(parsePositiveInt(
-                            offloadTailChars, chatMemory.getToolResultOffloadTailChars()));
+            if (chatMemory.taskStateTodoMaxItems == null) {
+                String todoMaxItems = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_MAX_ITEMS");
+                if (!isBlank(todoMaxItems)) {
+                    chatMemory.setTaskStateTodoMaxItems(parsePositiveInt(
+                            todoMaxItems, chatMemory.getTaskStateTodoMaxItems()));
                 }
             }
-            if (shouldApplyToolResultArtifactStoreDirFallback(chatMemory)) {
-                String artifactDir = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_STORE_DIR");
-                if (!isBlank(artifactDir)) {
-                    chatMemory.setToolResultArtifactStoreDir(artifactDir);
+            if (chatMemory.taskStateTodoItemMaxChars == null) {
+                String todoItemMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TASK_STATE_TODO_ITEM_MAX_CHARS");
+                if (!isBlank(todoItemMaxChars)) {
+                    chatMemory.setTaskStateTodoItemMaxChars(parsePositiveInt(
+                            todoItemMaxChars, chatMemory.getTaskStateTodoItemMaxChars()));
                 }
             }
-            if (chatMemory.toolResultRehydrateEnabled == null) {
-                String rehydrateEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_ENABLED");
-                if (!isBlank(rehydrateEnabled)) {
-                    chatMemory.setToolResultRehydrateEnabled(parseBooleanStrict(
-                            rehydrateEnabled, chatMemory.isToolResultRehydrateEnabled()));
+            if (chatMemory.toolResultBudgetEnabled == null) {
+                String budgetEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_ENABLED");
+                if (!isBlank(budgetEnabled)) {
+                    chatMemory.setToolResultBudgetEnabled(parseBooleanStrict(
+                            budgetEnabled, chatMemory.isToolResultBudgetEnabled()));
                 }
             }
-            if (chatMemory.toolResultRehydrateMaxChars == null) {
-                String rehydrateMaxChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_CHARS");
-                if (!isBlank(rehydrateMaxChars)) {
-                    chatMemory.setToolResultRehydrateMaxChars(parsePositiveInt(
-                            rehydrateMaxChars, chatMemory.getToolResultRehydrateMaxChars()));
+            if (chatMemory.toolResultBudgetMinChars == null) {
+                String minChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_MIN_CHARS");
+                if (!isBlank(minChars)) {
+                    chatMemory.setToolResultBudgetMinChars(parsePositiveInt(
+                            minChars, chatMemory.getToolResultBudgetMinChars()));
                 }
             }
-            if (chatMemory.toolResultRehydrateMaxPerRound == null) {
-                String rehydrateMaxPerRound = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND");
-                if (!isBlank(rehydrateMaxPerRound)) {
-                    chatMemory.setToolResultRehydrateMaxPerRound(parseNonNegativeInt(
-                            rehydrateMaxPerRound, chatMemory.getToolResultRehydrateMaxPerRound()));
+            if (chatMemory.toolResultBudgetPreviewHeadChars == null) {
+                String headChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS");
+                if (!isBlank(headChars)) {
+                    chatMemory.setToolResultBudgetPreviewHeadChars(parsePositiveInt(
+                            headChars, chatMemory.getToolResultBudgetPreviewHeadChars()));
                 }
             }
-            if (chatMemory.toolResultArtifactMaxIndexEntriesPerMemory == null) {
-                String maxIndexEntries = firstNonBlankEnv(
-                        "OPENMANUS_CHAT_MEMORY_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY");
-                if (!isBlank(maxIndexEntries)) {
-                    chatMemory.setToolResultArtifactMaxIndexEntriesPerMemory(parsePositiveInt(
-                            maxIndexEntries, chatMemory.getToolResultArtifactMaxIndexEntriesPerMemory()));
+            if (chatMemory.toolResultBudgetPreviewTailChars == null) {
+                String tailChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS");
+                if (!isBlank(tailChars)) {
+                    chatMemory.setToolResultBudgetPreviewTailChars(parsePositiveInt(
+                            tailChars, chatMemory.getToolResultBudgetPreviewTailChars()));
+                }
+            }
+            if (chatMemory.toolResultBudgetDecayChars == null) {
+                String decayChars = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_TOOL_RESULT_BUDGET_DECAY_CHARS");
+                if (!isBlank(decayChars)) {
+                    chatMemory.setToolResultBudgetDecayChars(parseNonNegativeInt(
+                            decayChars, chatMemory.getToolResultBudgetDecayChars()));
+                }
+            }
+            if (chatMemory.shellToolEnabled == null) {
+                String shellEnabled = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_ENABLED");
+                if (!isBlank(shellEnabled)) {
+                    chatMemory.setShellToolEnabled(parseBooleanStrict(shellEnabled, chatMemory.isShellToolEnabled()));
+                }
+            }
+            if (chatMemory.shellToolTimeoutSeconds == null) {
+                String shellTimeout = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_SHELL_TOOL_TIMEOUT_SECONDS");
+                if (!isBlank(shellTimeout)) {
+                    chatMemory.setShellToolTimeoutSeconds(parsePositiveInt(shellTimeout, chatMemory.getShellToolTimeoutSeconds()));
                 }
             }
             if (chatMemory.getModelContextMaxTotalMessages() == 1) {
                 log.warn("openmanus.chat-memory.model-context-max-total-messages=1 is an extreme mode; "
                         + "current user continuity is prioritized and system/history may be dropped for that round.");
+            }
+        }
+
+        if (mcp != null) {
+            if (mcp.enabled == null) {
+                String enabled = firstNonBlankEnv("OPENMANUS_MCP_ENABLED");
+                if (!isBlank(enabled)) {
+                    mcp.setEnabled(parseBooleanStrict(enabled, mcp.isEnabled()));
+                }
             }
         }
 
@@ -296,13 +427,24 @@ public class OpenManusProperties {
         return s == null || s.trim().isEmpty();
     }
 
+    private static boolean isPlaceholder(String s) {
+        if (s == null || s.isEmpty()) {
+            return false;
+        }
+        String lower = s.toLowerCase(Locale.ROOT);
+        return lower.startsWith("your-")
+                || lower.contains("placeholder")
+                || lower.contains("<your")
+                || lower.contains("your-api-key");
+    }
+
     private static String firstNonBlankEnv(String... names) {
         for (String name : names) {
-            String value = System.getenv(name);
+            String value = System.getProperty(name);
             if (!isBlank(value)) {
                 return value.trim();
             }
-            value = System.getProperty(name);
+            value = System.getenv(name);
             if (!isBlank(value)) {
                 return value.trim();
             }
@@ -328,6 +470,15 @@ public class OpenManusProperties {
         }
     }
 
+    private static double parsePositiveDouble(String value, double fallback) {
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
     private static boolean parseBooleanStrict(String value, boolean fallback) {
         if (value == null) {
             return fallback;
@@ -342,6 +493,20 @@ public class OpenManusProperties {
         return fallback;
     }
 
+    private static List<String> parseCsvList(String value) {
+        if (isBlank(value)) {
+            return List.of();
+        }
+        List<String> items = new ArrayList<>();
+        for (String item : value.split(",")) {
+            String trimmed = item == null ? "" : item.trim();
+            if (!trimmed.isEmpty()) {
+                items.add(trimmed);
+            }
+        }
+        return Collections.unmodifiableList(items);
+    }
+
     private static boolean shouldApplyChatMemoryFileStoreDirFallback(ChatMemoryConfig chatMemory) {
         if (chatMemory == null) {
             return false;
@@ -353,17 +518,6 @@ public class OpenManusProperties {
         return ChatMemoryConfig.DEFAULT_FILE_STORE_DIR.equals(dir);
     }
 
-    private static boolean shouldApplyToolResultArtifactStoreDirFallback(ChatMemoryConfig chatMemory) {
-        if (chatMemory == null) {
-            return false;
-        }
-        String dir = chatMemory.getToolResultArtifactStoreDir();
-        if (isBlank(dir)) {
-            return true;
-        }
-        return ChatMemoryConfig.DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR.equals(dir);
-    }
-    
     /**
      * Application basic configuration
      */
@@ -373,6 +527,7 @@ public class OpenManusProperties {
         private String version = "1.0.0";
         private String workspaceRoot = "./workspace";
         private String logLevel = "INFO";
+        private String defaultUserId = "001";
     }
     
     /**
@@ -386,9 +541,9 @@ public class OpenManusProperties {
         
         @Data
         public static class DefaultLLM {
-            private String model = "qwen3-max-preview";
-            private String baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1/";
-            private String apiType = "openai";
+            private String model = "";
+            private String baseUrl = "";
+            private String apiType = "";
             private Double temperature = 0.7;
             private Integer maxTokens = 8192;
             private Integer timeout = 120;
@@ -411,7 +566,6 @@ public class OpenManusProperties {
      */
     @Data
     public static class SandboxSettings {
-        private boolean useSandbox = false;
         private String image = "python:3.9-slim";
         private String workDir = "/workspace";
         private String memoryLimit = "512m";
@@ -481,6 +635,19 @@ public class OpenManusProperties {
          */
         private String serperEndpoint = "https://google.serper.dev/search";
     }
+
+    /**
+     * Web proxy exposure configuration.
+     */
+    @Data
+    public static class WebProxyConfig {
+        private Boolean enabled;
+        private List<String> allowedOrigins = List.of();
+
+        public boolean isEnabled() {
+            return Boolean.TRUE.equals(enabled);
+        }
+    }
     
     /**
      * Runflow configuration
@@ -499,27 +666,27 @@ public class OpenManusProperties {
     public static class ChatMemoryConfig {
         static final String DEFAULT_FILE_STORE_DIR =
                 System.getProperty("java.io.tmpdir") + "/openmanus/chat-memory";
-        static final String DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR =
-                System.getProperty("java.io.tmpdir") + "/openmanus/tool-result-artifacts";
         private static final int DEFAULT_RETENTION_DAYS = 30;
         private static final boolean DEFAULT_QUARANTINE_CORRUPTED_FILES = true;
-        private static final int DEFAULT_TOOL_RESULT_MAX_CHARS = 4000;
-        private static final int DEFAULT_COMPACT_TOOL_RESULT_HEAD_CHARS = 300;
-        private static final int DEFAULT_COMPACT_TOOL_RESULT_TAIL_CHARS = 200;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_TOTAL_MESSAGES = 0;
         private static final int DEFAULT_MODEL_CONTEXT_MAX_APPROX_TOKENS = 128000;
+        private static final String DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE = "approx";
         private static final int DEFAULT_REACT_MAX_ITERATIONS = 0;
         private static final int DEFAULT_REACT_MAX_EXECUTION_SECONDS = 0;
         private static final int DEFAULT_REACT_REPEATED_TOOL_CALL_THRESHOLD = 0;
-        private static final boolean DEFAULT_TOOL_RESULT_OFFLOAD_ENABLED = true;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_MIN_CHARS = 12000;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_HEAD_CHARS = 240;
-        private static final int DEFAULT_TOOL_RESULT_OFFLOAD_TAIL_CHARS = 160;
-        private static final boolean DEFAULT_TOOL_RESULT_REHYDRATE_ENABLED = true;
-        private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_CHARS = 8000;
-        private static final int DEFAULT_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND = 2;
-        private static final int DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY = 20000;
+        private static final int DEFAULT_TASK_STATE_PLAN_MAX_CHARS = 240;
+        private static final int DEFAULT_TASK_STATE_IN_PROGRESS_MAX_CHARS = 120;
+        private static final int DEFAULT_TASK_STATE_LAST_FAILURE_MAX_CHARS = 240;
+        private static final int DEFAULT_TASK_STATE_TODO_MAX_ITEMS = 6;
+        private static final int DEFAULT_TASK_STATE_TODO_ITEM_MAX_CHARS = 120;
+        private static final boolean DEFAULT_TOOL_RESULT_BUDGET_ENABLED = true;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_MIN_CHARS = 12000;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS = 240;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS = 160;
+        private static final int DEFAULT_TOOL_RESULT_BUDGET_DECAY_CHARS = 0;
+        private static final boolean DEFAULT_SHELL_TOOL_ENABLED = true;
+        private static final int DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS = 15;
 
         /**
          * Chat memory store type: file | in-memory.
@@ -539,19 +706,6 @@ public class OpenManusProperties {
          */
         private Boolean quarantineCorruptedFiles = null;
         /**
-         * Maximum tool-result chars persisted in long-term chat memory.
-         * Only used when compact-tool-results-enabled=true.
-         */
-        private Integer toolResultMaxChars = null;
-        /**
-         * Number of leading chars preserved when tool result is compacted.
-         */
-        private Integer compactToolResultHeadChars = null;
-        /**
-         * Number of trailing chars preserved when tool result is compacted.
-         */
-        private Integer compactToolResultTailChars = null;
-        /**
          * Max number of historical messages sent to model each round.
          * 0 means unlimited.
          */
@@ -568,10 +722,10 @@ public class OpenManusProperties {
          */
         private Integer modelContextMaxApproxTokens = null;
         /**
-         * Whether to compact large tool results before persisting into long-term chat memory.
-         * Default false to keep full message continuity.
+         * Token-count mode used by model-context budget.
+         * Supported values: approx | tokenizer.
          */
-        private Boolean compactToolResultsEnabled = null;
+        private String modelContextTokenCountMode = "";
         /**
          * Max ReAct loop iterations for one execute. 0 means unlimited.
          */
@@ -586,71 +740,59 @@ public class OpenManusProperties {
          */
         private Integer reactRepeatedToolCallThreshold = null;
         /**
-         * Whether to offload very large tool results into external artifact storage (lossless).
-         * Chat memory only keeps a compact index card when enabled.
+         * Max chars for task-state plan field in context card.
          */
-        private Boolean toolResultOffloadEnabled = null;
+        private Integer taskStatePlanMaxChars = null;
         /**
-         * Minimum chars to trigger tool-result offloading.
+         * Max chars for task-state in-progress field in context card.
          */
-        private Integer toolResultOffloadMinChars = null;
+        private Integer taskStateInProgressMaxChars = null;
         /**
-         * Leading preview chars kept in tool-result offload card.
+         * Max chars for task-state last-failure field in context card.
          */
-        private Integer toolResultOffloadHeadChars = null;
+        private Integer taskStateLastFailureMaxChars = null;
         /**
-         * Trailing preview chars kept in tool-result offload card.
+         * Max todo items allowed in task-state context card.
          */
-        private Integer toolResultOffloadTailChars = null;
+        private Integer taskStateTodoMaxItems = null;
         /**
-         * Artifact store directory used when offloading large tool results.
+         * Max chars for each todo item in task-state context card.
          */
-        private String toolResultArtifactStoreDir = DEFAULT_TOOL_RESULT_ARTIFACT_STORE_DIR;
+        private Integer taskStateTodoItemMaxChars = null;
         /**
-         * Whether to rehydrate compacted tool results from artifact store into model input.
+         * Whether to replace oversized tool results with explicit sandbox file stubs before model API calls.
          */
-        private Boolean toolResultRehydrateEnabled = null;
+        private Boolean toolResultBudgetEnabled = null;
         /**
-         * Max chars allowed for each rehydrated tool result.
+         * Minimum chars to trigger tool-result budget offload.
          */
-        private Integer toolResultRehydrateMaxChars = null;
+        private Integer toolResultBudgetMinChars = null;
         /**
-         * Max rehydrated tool-result blocks injected per model round.
-         * 0 means unlimited.
+         * Leading preview chars kept in the tool-result stub.
          */
-        private Integer toolResultRehydrateMaxPerRound = null;
+        private Integer toolResultBudgetPreviewHeadChars = null;
         /**
-         * Per conversation, maximum index references retained in artifact index file.
-         * Exceeded history is pruned from the index tail to avoid long-running sessions becoming slow.
+         * Trailing preview chars kept in the tool-result stub.
          */
-        private Integer toolResultArtifactMaxIndexEntriesPerMemory = null;
-
-        public boolean isCompactToolResultsEnabled() {
-            return Boolean.TRUE.equals(compactToolResultsEnabled);
-        }
-
+        private Integer toolResultBudgetPreviewTailChars = null;
+        /**
+         * Optional context-decay chars threshold. 0 disables decay-triggered offload.
+         */
+        private Integer toolResultBudgetDecayChars = null;
+        /**
+         * Whether to enable generic shell tool for model-driven file discovery and partial reads.
+         */
+        private Boolean shellToolEnabled = null;
+        /**
+         * Timeout seconds for one shell command execution.
+         */
+        private Integer shellToolTimeoutSeconds = null;
         public int getRetentionDays() {
             return retentionDays == null ? DEFAULT_RETENTION_DAYS : retentionDays;
         }
 
         public boolean isQuarantineCorruptedFiles() {
             return quarantineCorruptedFiles == null ? DEFAULT_QUARANTINE_CORRUPTED_FILES : quarantineCorruptedFiles;
-        }
-
-        public int getToolResultMaxChars() {
-            return toolResultMaxChars == null ? DEFAULT_TOOL_RESULT_MAX_CHARS : toolResultMaxChars;
-        }
-
-        public int getCompactToolResultHeadChars() {
-            return compactToolResultHeadChars == null
-                    ? DEFAULT_COMPACT_TOOL_RESULT_HEAD_CHARS
-                    : compactToolResultHeadChars;
-        }
-
-        public int getCompactToolResultTailChars() {
-            return compactToolResultTailChars == null
-                    ? DEFAULT_COMPACT_TOOL_RESULT_TAIL_CHARS
-                    : compactToolResultTailChars;
         }
 
         public int getModelContextMaxMessages() {
@@ -671,6 +813,14 @@ public class OpenManusProperties {
                     : modelContextMaxApproxTokens;
         }
 
+        public String getModelContextTokenCountMode() {
+            return normalizeModelContextTokenCountMode(modelContextTokenCountMode);
+        }
+
+        String getModelContextTokenCountModeRaw() {
+            return modelContextTokenCountMode;
+        }
+
         public int getReactMaxIterations() {
             return reactMaxIterations == null
                     ? DEFAULT_REACT_MAX_ITERATIONS
@@ -689,52 +839,72 @@ public class OpenManusProperties {
                     : reactRepeatedToolCallThreshold;
         }
 
-        public boolean isToolResultOffloadEnabled() {
-            return toolResultOffloadEnabled == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_ENABLED
-                    : Boolean.TRUE.equals(toolResultOffloadEnabled);
+        public int getTaskStatePlanMaxChars() {
+            return taskStatePlanMaxChars == null
+                    ? DEFAULT_TASK_STATE_PLAN_MAX_CHARS
+                    : taskStatePlanMaxChars;
         }
 
-        public int getToolResultOffloadMinChars() {
-            return toolResultOffloadMinChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_MIN_CHARS
-                    : toolResultOffloadMinChars;
+        public int getTaskStateInProgressMaxChars() {
+            return taskStateInProgressMaxChars == null
+                    ? DEFAULT_TASK_STATE_IN_PROGRESS_MAX_CHARS
+                    : taskStateInProgressMaxChars;
         }
 
-        public int getToolResultOffloadHeadChars() {
-            return toolResultOffloadHeadChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_HEAD_CHARS
-                    : toolResultOffloadHeadChars;
+        public int getTaskStateLastFailureMaxChars() {
+            return taskStateLastFailureMaxChars == null
+                    ? DEFAULT_TASK_STATE_LAST_FAILURE_MAX_CHARS
+                    : taskStateLastFailureMaxChars;
         }
 
-        public int getToolResultOffloadTailChars() {
-            return toolResultOffloadTailChars == null
-                    ? DEFAULT_TOOL_RESULT_OFFLOAD_TAIL_CHARS
-                    : toolResultOffloadTailChars;
+        public int getTaskStateTodoMaxItems() {
+            return taskStateTodoMaxItems == null
+                    ? DEFAULT_TASK_STATE_TODO_MAX_ITEMS
+                    : taskStateTodoMaxItems;
         }
 
-        public boolean isToolResultRehydrateEnabled() {
-            return toolResultRehydrateEnabled == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_ENABLED
-                    : Boolean.TRUE.equals(toolResultRehydrateEnabled);
+        public int getTaskStateTodoItemMaxChars() {
+            return taskStateTodoItemMaxChars == null
+                    ? DEFAULT_TASK_STATE_TODO_ITEM_MAX_CHARS
+                    : taskStateTodoItemMaxChars;
         }
 
-        public int getToolResultRehydrateMaxChars() {
-            return toolResultRehydrateMaxChars == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_MAX_CHARS
-                    : toolResultRehydrateMaxChars;
+        public boolean isToolResultBudgetEnabled() {
+            return toolResultBudgetEnabled == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_ENABLED
+                    : Boolean.TRUE.equals(toolResultBudgetEnabled);
         }
 
-        public int getToolResultRehydrateMaxPerRound() {
-            return toolResultRehydrateMaxPerRound == null
-                    ? DEFAULT_TOOL_RESULT_REHYDRATE_MAX_PER_ROUND
-                    : toolResultRehydrateMaxPerRound;
+        public int getToolResultBudgetMinChars() {
+            return toolResultBudgetMinChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_MIN_CHARS
+                    : toolResultBudgetMinChars;
         }
 
-        public int getToolResultArtifactMaxIndexEntriesPerMemory() {
-            return toolResultArtifactMaxIndexEntriesPerMemory == null
-                    ? DEFAULT_TOOL_RESULT_ARTIFACT_MAX_INDEX_ENTRIES_PER_MEMORY
-                    : toolResultArtifactMaxIndexEntriesPerMemory;
+        public int getToolResultBudgetPreviewHeadChars() {
+            return toolResultBudgetPreviewHeadChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_HEAD_CHARS
+                    : toolResultBudgetPreviewHeadChars;
+        }
+
+        public int getToolResultBudgetPreviewTailChars() {
+            return toolResultBudgetPreviewTailChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_PREVIEW_TAIL_CHARS
+                    : toolResultBudgetPreviewTailChars;
+        }
+
+        public int getToolResultBudgetDecayChars() {
+            return toolResultBudgetDecayChars == null
+                    ? DEFAULT_TOOL_RESULT_BUDGET_DECAY_CHARS
+                    : toolResultBudgetDecayChars;
+        }
+
+        public boolean isShellToolEnabled() {
+            return shellToolEnabled == null ? DEFAULT_SHELL_TOOL_ENABLED : Boolean.TRUE.equals(shellToolEnabled);
+        }
+
+        public int getShellToolTimeoutSeconds() {
+            return shellToolTimeoutSeconds == null ? DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS : shellToolTimeoutSeconds;
         }
 
         /**
@@ -758,6 +928,12 @@ public class OpenManusProperties {
             this.modelContextMaxApproxTokens = clampNonNegativeOrNull(modelContextMaxApproxTokens);
         }
 
+        public void setModelContextTokenCountMode(String modelContextTokenCountMode) {
+            this.modelContextTokenCountMode = modelContextTokenCountMode == null
+                    ? ""
+                    : modelContextTokenCountMode.trim();
+        }
+
         public void setReactMaxIterations(Integer reactMaxIterations) {
             this.reactMaxIterations = clampNonNegativeOrNull(reactMaxIterations);
         }
@@ -770,28 +946,40 @@ public class OpenManusProperties {
             this.reactRepeatedToolCallThreshold = clampNonNegativeOrNull(reactRepeatedToolCallThreshold);
         }
 
-        public void setToolResultOffloadMinChars(Integer toolResultOffloadMinChars) {
-            this.toolResultOffloadMinChars = clampPositiveOrNull(toolResultOffloadMinChars);
+        public void setTaskStatePlanMaxChars(Integer taskStatePlanMaxChars) {
+            this.taskStatePlanMaxChars = clampPositiveOrNull(taskStatePlanMaxChars);
         }
 
-        public void setToolResultOffloadHeadChars(Integer toolResultOffloadHeadChars) {
-            this.toolResultOffloadHeadChars = clampPositiveOrNull(toolResultOffloadHeadChars);
+        public void setTaskStateInProgressMaxChars(Integer taskStateInProgressMaxChars) {
+            this.taskStateInProgressMaxChars = clampPositiveOrNull(taskStateInProgressMaxChars);
         }
 
-        public void setToolResultOffloadTailChars(Integer toolResultOffloadTailChars) {
-            this.toolResultOffloadTailChars = clampPositiveOrNull(toolResultOffloadTailChars);
+        public void setTaskStateLastFailureMaxChars(Integer taskStateLastFailureMaxChars) {
+            this.taskStateLastFailureMaxChars = clampPositiveOrNull(taskStateLastFailureMaxChars);
         }
 
-        public void setToolResultRehydrateMaxChars(Integer toolResultRehydrateMaxChars) {
-            this.toolResultRehydrateMaxChars = clampPositiveOrNull(toolResultRehydrateMaxChars);
+        public void setTaskStateTodoMaxItems(Integer taskStateTodoMaxItems) {
+            this.taskStateTodoMaxItems = clampPositiveOrNull(taskStateTodoMaxItems);
         }
 
-        public void setToolResultRehydrateMaxPerRound(Integer toolResultRehydrateMaxPerRound) {
-            this.toolResultRehydrateMaxPerRound = clampNonNegativeOrNull(toolResultRehydrateMaxPerRound);
+        public void setTaskStateTodoItemMaxChars(Integer taskStateTodoItemMaxChars) {
+            this.taskStateTodoItemMaxChars = clampPositiveOrNull(taskStateTodoItemMaxChars);
         }
 
-        public void setToolResultArtifactMaxIndexEntriesPerMemory(Integer toolResultArtifactMaxIndexEntriesPerMemory) {
-            this.toolResultArtifactMaxIndexEntriesPerMemory = clampPositiveOrNull(toolResultArtifactMaxIndexEntriesPerMemory);
+        public void setToolResultBudgetMinChars(Integer toolResultBudgetMinChars) {
+            this.toolResultBudgetMinChars = clampPositiveOrNull(toolResultBudgetMinChars);
+        }
+
+        public void setToolResultBudgetPreviewHeadChars(Integer toolResultBudgetPreviewHeadChars) {
+            this.toolResultBudgetPreviewHeadChars = clampPositiveOrNull(toolResultBudgetPreviewHeadChars);
+        }
+
+        public void setToolResultBudgetPreviewTailChars(Integer toolResultBudgetPreviewTailChars) {
+            this.toolResultBudgetPreviewTailChars = clampPositiveOrNull(toolResultBudgetPreviewTailChars);
+        }
+
+        public void setToolResultBudgetDecayChars(Integer toolResultBudgetDecayChars) {
+            this.toolResultBudgetDecayChars = clampNonNegativeOrNull(toolResultBudgetDecayChars);
         }
 
         private static Integer clampPositiveOrNull(Integer value) {
@@ -806,6 +994,39 @@ public class OpenManusProperties {
                 return null;
             }
             return value < 0 ? 0 : value;
+        }
+
+        private static String normalizeModelContextTokenCountMode(String value) {
+            if (value == null || value.isBlank()) {
+                return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
+            }
+            String normalized = value.trim().toLowerCase(Locale.ROOT);
+            if ("tokenizer".equals(normalized)) {
+                return normalized;
+            }
+            return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
+        }
+    }
+
+    /**
+     * MCP runtime configuration.
+     */
+    @Data
+    public static class McpConfig {
+        private static final boolean DEFAULT_ENABLED = false;
+
+        /**
+         * Whether MCP tools are allowed to enter the main agent toolchain.
+         * Disabled by default in the current stage.
+         */
+        private Boolean enabled = null;
+
+        public boolean isEnabled() {
+            return enabled == null ? DEFAULT_ENABLED : Boolean.TRUE.equals(enabled);
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled == null ? null : Boolean.TRUE.equals(enabled);
         }
     }
 

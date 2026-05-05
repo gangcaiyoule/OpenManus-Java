@@ -14,7 +14,8 @@ import com.openmanus.aiframework.parser.GeminiResponseParser;
 import com.openmanus.aiframework.transport.HttpTransport;
 import com.openmanus.aiframework.transport.SseTransport;
 import org.junit.jupiter.api.Assumptions;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
 import java.net.http.HttpClient;
 import java.util.ArrayList;
@@ -24,24 +25,28 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Tag("live-smoke")
+@EnabledIfSystemProperty(
+        named = LiveSmokeTest.LIVE_SMOKE_OPT_IN_PROPERTY,
+        matches = LiveSmokeTest.LIVE_SMOKE_OPT_IN_PATTERN
+)
 class GeminiClientLiveSmokeTest {
 
-    @Test
+    @LiveSmokeTest
     void shouldCallLiveGeminiEndpointForChatAndStream() {
-        String model = System.getenv("OPENMANUS_LIVE_GEMINI_MODEL");
-        String baseUrl = System.getenv("OPENMANUS_LIVE_GEMINI_BASE_URL");
-        String apiKey = System.getenv("OPENMANUS_LIVE_GEMINI_API_KEY");
+        LiveSmokeEnv.ProviderEnv env = LiveSmokeEnv.gemini();
 
-        Assumptions.assumeTrue(notBlank(model) && notBlank(baseUrl) && notBlank(apiKey),
-                "live smoke test requires OPENMANUS_LIVE_GEMINI_MODEL/BASE_URL/API_KEY env vars");
+        Assumptions.assumeTrue(env.isConfigured(),
+                "live smoke test requires OPENMANUS_LIVE_GEMINI_MODEL/BASE_URL/API_KEY env vars "
+                        + "or OPENMANUS_LLM_PROVIDERS_GEMINI_MODEL/BASE_URL/API_KEY env vars");
 
         ObjectMapper objectMapper = new ObjectMapper();
         GeminiClient client = new GeminiClient(
                 ProviderConfig.builder()
                         .providerType(AiProviderType.GEMINI)
-                        .baseUrl(baseUrl)
-                        .apiKey(apiKey)
-                        .model(model)
+                        .baseUrl(env.baseUrl())
+                        .apiKey(env.apiKey())
+                        .model(env.model())
                         .timeoutSeconds(60)
                         .maxRetries(1)
                         .build(),
@@ -74,7 +79,7 @@ class GeminiClientLiveSmokeTest {
 
         ChatRequestEnvelope chatRequest = ChatRequestEnvelope.builder()
                 .providerType(AiProviderType.GEMINI)
-                .model(model)
+                .model(env.model())
                 .message(ChatMessage.builder().role("user").content("Reply with exactly: live_ok").build())
                 .providerPayload(payload)
                 .requestOptions(ChatRequestOptions.builder().maxTokens(32).temperature(0.0).stream(false).build())
@@ -87,7 +92,7 @@ class GeminiClientLiveSmokeTest {
 
         ChatRequestEnvelope streamRequest = ChatRequestEnvelope.builder()
                 .providerType(AiProviderType.GEMINI)
-                .model(model)
+                .model(env.model())
                 .message(ChatMessage.builder().role("user").content("Reply with exactly: stream_ok").build())
                 .providerPayload(payload)
                 .requestOptions(ChatRequestOptions.builder().maxTokens(32).temperature(0.0).stream(true).build())
@@ -121,9 +126,5 @@ class GeminiClientLiveSmokeTest {
         Assumptions.assumeTrue(error.get() == null, "stream call failed: " + error.get());
         assertNotNull(done.get());
         assertTrue(!deltas.isEmpty() || (done.get().getContent() != null && !done.get().getContent().isBlank()));
-    }
-
-    private boolean notBlank(String value) {
-        return value != null && !value.trim().isEmpty();
     }
 }

@@ -14,7 +14,7 @@ import java.util.Map;
  * 
  * 职责：只推送标记为 TO_FRONTEND 的重要日志到前端
  * 
- * 工作流程：
+ * 处理流程：
  * 1. 过滤：只处理带有 TO_FRONTEND 标记的日志
  * 2. 提取：从 MDC 中获取 sessionId
  * 3. 构建：格式化日志消息
@@ -37,7 +37,7 @@ public class WebSocketLogAppender extends AppenderBase<ILoggingEvent> {
                 return;
             }
 
-            LogRelayService service = LogRelayService.getInstance();
+            LogRelayService service = LogRelayBridge.get();
             if (service == null) {
                 return;
             }

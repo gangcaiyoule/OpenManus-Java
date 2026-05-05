@@ -10,7 +10,7 @@
 
 [![Java](https://img.shields.io/badge/Java-21+-orange)](https://openjdk.java.net/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.0-green)](https://spring.io/projects/spring-boot)
-[![LangChain4j](https://img.shields.io/badge/LangChain4j-1.1.0-yellow)](https://github.com/langchain4j/langchain4j)
+[![AI Runtime](https://img.shields.io/badge/AI%20Runtime-aiframework--runtime--first-0A7F5A)](#-架构设计)
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 [🚀 快速开始](#-快速开始) •
@@ -19,7 +19,7 @@
 
 ## 📋 项目概述
 
-OpenManusJava 是一个基于 Spring Boot 和 LangChain4j 开发的智能系统。当前采用扁平化单智能体架构：一个 ReAct 循环、统一工具注册、跨轮次连续 ChatMemory 上下文。
+OpenManusJava 是一个基于 Spring Boot 与 aiframework runtime-first 架构的智能系统。当前采用扁平化单智能体架构：一个 ReAct 循环、统一工具注册、跨轮次连续 ChatMemory 上下文。
 
 ### 🎯 功能特性
 
@@ -89,7 +89,7 @@ graph TD
 | **组件** | **技术选型** | **用途** |
 |----------|-------------|---------|
 | **后端框架** | Spring Boot 3.2.0 | 应用核心框架 |
-| **AI集成** | LangChain4j 1.1.0 | LLM 对接与单智能体 ReAct 执行 |
+| **AI集成** | aiframework runtime-first | 面向多 Provider 的 LLM 运行时抽象与单智能体 ReAct 执行 |
 | **前端** | Vue.js 3 + Element Plus | 现代化、响应式用户界面 |
 | **实时通信** | WebSocket + STOMP | 前后端实时消息与日志流 |
 | **API** | RESTful API | 服务接口 |
@@ -101,7 +101,7 @@ graph TD
 
 - **Java 21+**
 - **Maven 3.9+**
-- **阿里云百炼API Key** (或其他支持的LLM服务)
+- **OpenAI 兼容 API Key** (或其他支持的LLM服务)
 
 ### 安装步骤
 
@@ -111,32 +111,23 @@ graph TD
    cd OpenManus-Java
    ```
 
-2. **配置 API Key（推荐）**
-   将 `dotenv.example` 复制为 `.env` 并填入你的 API Key：
+2. **配置 `.env`（推荐）**
+   将 `dotenv.example` 复制为 `.env` 并填入你的模型配置：
    ```bash
    cp dotenv.example .env
    ```
-
-3. **可选：覆盖应用配置**
-   以 `src/main/resources/application-example.yml` 为参考，新建 `src/main/resources/application-local.yml` 写入你的个人覆盖配置。
 
 4. **启动应用**
    ```bash
    mvn spring-boot:run
    ```
-   如果你创建了 `application-local.yml`，可以通过 local profile 启动：
-   ```bash
-   mvn spring-boot:run -Dspring-boot.run.profiles=local
-   ```
 
 5. **访问服务**
    浏览器访问: http://localhost:8089
 
-如需 Docker Compose 一键启动，请参考：`docs/QUICK_START.md`。
-
 ## 🧠 长上下文参数建议（推荐）
 
-如需“有工具调用就持续循环”并控制长上下文膨胀，建议在 `application-local.yml` 中配置 `openmanus.chat-memory`。
+如需“有工具调用就持续循环”并控制长上下文膨胀，建议在 Spring 配置中调整 `openmanus.chat-memory`。
 
 - **保持工具循环不断**  
   设置 `react-max-iterations: 0`（无限轮次）。  
@@ -222,7 +213,6 @@ Swagger UI：http://localhost:8089/swagger-ui.html
 ## 🙏 致谢
 
 感谢以下开源项目的支持：
-- [LangChain4j](https://github.com/langchain4j/langchain4j)
 - [Spring Boot](https://spring.io/projects/spring-boot)
 
 ## 📄 许可证

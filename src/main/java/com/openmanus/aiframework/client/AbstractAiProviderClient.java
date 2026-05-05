@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.aiframework.api.AiProviderClient;
 import com.openmanus.aiframework.api.StreamListener;
 import com.openmanus.aiframework.assembler.ProviderRequestAssembler;
+import com.openmanus.aiframework.exception.AiFrameworkException;
 import com.openmanus.aiframework.model.ChatRequestEnvelope;
 import com.openmanus.aiframework.model.ChatRequestOptions;
 import com.openmanus.aiframework.model.ChatResponseEnvelope;
@@ -52,6 +53,9 @@ public abstract class AbstractAiProviderClient implements AiProviderClient {
                 resolveTimeout(request),
                 resolveMaxRetries(request)
         );
+        if (isSseEnvelope(response)) {
+            return parseSseChatResponse(response.path("events"));
+        }
         return parser.parse(response);
     }
 
@@ -96,14 +100,13 @@ public abstract class AbstractAiProviderClient implements AiProviderClient {
                     }
             );
 
-            ChatResponseEnvelope done = ChatResponseEnvelope.builder()
-                    .providerType(providerConfig.getProviderType())
-                    .content(delta.toString())
-                    .toolCalls(toolCalls)
-                    .finishReason(latestFinishReason[0])
-                    .usage(latestUsage[0])
-                    .rawResponse(latestRawChunk[0])
-                    .build();
+            ChatResponseEnvelope done = buildSseResponse(
+                    delta,
+                    toolCalls,
+                    latestFinishReason[0],
+                    latestUsage[0],
+                    latestRawChunk[0]
+            );
             listener.onComplete(done);
         } catch (Exception e) {
             listener.onError(e);
@@ -151,6 +154,65 @@ public abstract class AbstractAiProviderClient implements AiProviderClient {
         Map<String, String> headers = new HashMap<>();
         enrichHeaders(headers);
         return headers;
+    }
+
+    private boolean isSseEnvelope(JsonNode response) {
+        return response != null
+                && "sse".equals(response.path("_transport_format").asText(null))
+                && response.path("events").isArray();
+    }
+
+    private ChatResponseEnvelope parseSseChatResponse(JsonNode events) {
+        StringBuilder delta = new StringBuilder();
+        List<JsonNode> toolCalls = new ArrayList<>();
+        JsonNode latestUsage = null;
+        String latestFinishReason = null;
+        JsonNode latestRawChunk = null;
+
+        for (JsonNode event : events) {
+            String eventType = event.path("eventType").asText("message");
+            JsonNode data = event.has("data") ? event.get("data") : null;
+            if (data != null && data.path("error").isObject() && !data.path("error").isEmpty()) {
+                throw new AiFrameworkException("Provider returned error payload: " + data.path("error"));
+            }
+            ProviderStreamChunk parsed = parser.parseStreamChunk(eventType, data);
+            latestRawChunk = parsed.getRawChunk() != null ? parsed.getRawChunk() : latestRawChunk;
+            if (parsed.getDeltaText() != null && !parsed.getDeltaText().isBlank()) {
+                delta.append(parsed.getDeltaText());
+            }
+            if (parsed.getFinishReason() != null && !parsed.getFinishReason().isBlank()) {
+                latestFinishReason = parsed.getFinishReason();
+            }
+            if (parsed.getUsage() != null && !parsed.getUsage().isNull() && !parsed.getUsage().isMissingNode()) {
+                latestUsage = parsed.getUsage();
+            } else if (data != null && data.path("usage").isObject()) {
+                latestUsage = data.path("usage");
+            }
+            toolCalls.addAll(parsed.getToolCalls());
+            if (parsed.isCompleted()) {
+                break;
+            }
+        }
+
+        return buildSseResponse(delta, toolCalls, latestFinishReason, latestUsage, latestRawChunk);
+    }
+
+    private ChatResponseEnvelope buildSseResponse(StringBuilder delta,
+                                                  List<JsonNode> toolCalls,
+                                                  String finishReason,
+                                                  JsonNode usage,
+                                                  JsonNode rawChunk) {
+        if (delta.isEmpty() && toolCalls.isEmpty() && finishReason == null) {
+            throw new AiFrameworkException("Provider returned empty SSE response without content or finish reason");
+        }
+        return ChatResponseEnvelope.builder()
+                .providerType(providerConfig.getProviderType())
+                .content(delta.toString())
+                .toolCalls(toolCalls)
+                .finishReason(finishReason)
+                .usage(usage)
+                .rawResponse(rawChunk)
+                .build();
     }
 
     protected abstract void enrichHeaders(Map<String, String> headers);

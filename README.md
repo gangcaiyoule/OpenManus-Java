@@ -10,7 +10,7 @@
 
 [![Java](https://img.shields.io/badge/Java-21+-orange)](https://openjdk.java.net/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.2.0-green)](https://spring.io/projects/spring-boot)
-[![LangChain4j](https://img.shields.io/badge/LangChain4j-1.1.0-yellow)](https://github.com/langchain4j/langchain4j)
+[![AI Runtime](https://img.shields.io/badge/AI%20Runtime-aiframework--runtime--first-0A7F5A)](#-architecture)
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 
 [🚀 Quick Start](#-quick-start) •
@@ -19,7 +19,7 @@
 
 ## 📋 Project Overview
 
-OpenManusJava is an intelligent system built with Spring Boot and LangChain4j. It now uses a flattened single-agent architecture: one ReAct loop, unified tool registration, and continuous chat memory across turns.
+OpenManusJava is an intelligent system built with Spring Boot and an aiframework runtime-first architecture. It uses a flattened single-agent architecture: one ReAct loop, unified tool registration, and continuous chat memory across turns.
 
 ### 🎯 Features
 
@@ -88,7 +88,7 @@ graph TD
 | **Component** | **Technology** | **Purpose** |
 |----------|-------------|---------|
 | **Backend Framework** | Spring Boot 3.2.0 | Core application framework |
-| **AI Integration** | LangChain4j 1.1.0 | LLM integration and single-agent ReAct execution |
+| **AI Integration** | aiframework runtime-first | Provider-agnostic LLM runtime abstraction and single-agent ReAct execution |
 | **Frontend** | Vue.js 3 + Element Plus | Modern, responsive user interface |
 | **Real-time Comms** | WebSocket + STOMP | Real-time messaging and log streaming |
 | **API** | RESTful API | Service interface |
@@ -100,7 +100,7 @@ graph TD
 
 - **Java 21+**
 - **Maven 3.9+**
-- **Alibaba Cloud Bailian API Key** (or other supported LLM service)
+- **OpenAI-compatible API Key** (or other supported LLM service)
 
 ### Installation
 
@@ -110,32 +110,23 @@ graph TD
    cd OpenManus-Java
    ```
 
-2. **Configure API keys (recommended)**
-   Copy `dotenv.example` to `.env` and fill in your API keys:
+2. **Configure `.env` (recommended)**
+   Copy `dotenv.example` to `.env` and fill in your API settings:
    ```bash
    cp dotenv.example .env
    ```
-
-3. **Optional: override application config**
-   Use `src/main/resources/application-example.yml` as a reference, and create `src/main/resources/application-local.yml` for personal overrides.
 
 4. **Start the application**
    ```bash
    mvn spring-boot:run
    ```
-   If you created `application-local.yml`, run with the local profile:
-   ```bash
-   mvn spring-boot:run -Dspring-boot.run.profiles=local
-   ```
 
 5. **Access the service**
    Open your browser and go to: http://localhost:8089
 
-For a one-command setup (Docker Compose), see: `docs/QUICK_START.md`.
-
 ## 🧠 Long-Context Tuning (Recommended)
 
-To keep the ReAct loop running while controlling context growth, adjust `openmanus.chat-memory` in `application-local.yml`.
+To keep the ReAct loop running while controlling context growth, adjust `openmanus.chat-memory` in Spring config.
 
 - **Keep looping on tool calls**  
   Set `react-max-iterations: 0` (unlimited).  
@@ -219,7 +210,6 @@ Swagger UI: http://localhost:8089/swagger-ui.html
 ## 🙏 Acknowledgements
 
 Thanks to the following open-source projects for their support:
-- [LangChain4j](https://github.com/langchain4j/langchain4j)
 - [Spring Boot](https://spring.io/projects/spring-boot)
 
 ## 📄 License

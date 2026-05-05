@@ -58,9 +58,10 @@ echo "[2/3] Compile..."
 ./scripts/mvnw-local.sh -q -DskipTests compile
 
 echo "[3/3] Regression tests..."
+rm -rf target/test-classes
 TEST_ARGS=(
   -q
-  "-Dtest=SingleAgentArchitectureGuardTest,ValidationScriptsConsistencyTest,MvnwLocalScriptIntegrationTest,UnifiedWorkflowTest,AgentControllerStreamEndpointTest,AgentControllerServiceContractTest,AgentServiceConversationMemoryTest,WorkflowStreamServiceSessionMemoryTest,FileToolSandboxTest,PythonToolSandboxPathTest,LangChain4jConfigChatMemoryTest"
+  "-Dtest=SingleAgentArchitectureGuardTest,ValidationScriptsConsistencyTest,MvnwLocalScriptIntegrationTest,UnifiedWorkflowTest,AgentControllerStreamEndpointTest,AgentControllerServiceContractTest,AgentServiceConversationMemoryTest,WorkflowStreamServiceSessionMemoryTest,FileToolSandboxTest,PythonToolSandboxPathTest,RuntimeChatMemoryProviderTest"
   test
 )
 LOG_FILE="$(mktemp)"

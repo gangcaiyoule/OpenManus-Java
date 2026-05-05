@@ -11,7 +11,11 @@ public class AiProviderClientRegistry {
     private final Map<AiProviderType, AiProviderClient> clients;
 
     public AiProviderClientRegistry(Map<AiProviderType, AiProviderClient> clients) {
-        this.clients = new EnumMap<>(clients);
+        EnumMap<AiProviderType, AiProviderClient> map = new EnumMap<>(AiProviderType.class);
+        if (clients != null) {
+            map.putAll(clients);
+        }
+        this.clients = map;
     }
 
     public AiProviderClient getClient(AiProviderType providerType) {

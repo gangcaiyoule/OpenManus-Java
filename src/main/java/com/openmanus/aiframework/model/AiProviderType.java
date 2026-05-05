@@ -9,6 +9,15 @@ public enum AiProviderType {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("provider type cannot be blank");
         }
-        return AiProviderType.valueOf(value.trim().toUpperCase());
+        String normalized = value.trim().toLowerCase()
+                .replace("-", "")
+                .replace("_", "")
+                .replace(" ", "");
+        return switch (normalized) {
+            case "openai", "openaicompatible" -> OPENAI;
+            case "anthropic" -> ANTHROPIC;
+            case "gemini", "google" -> GEMINI;
+            default -> throw new IllegalArgumentException("unsupported provider type: " + value);
+        };
     }
 }

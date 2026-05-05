@@ -54,8 +54,8 @@ public class AgentExecutionTracker {
     /**
      * 结束 Agent 执行
      */
-    public void endAgentExecution(String sessionId, String agentName, String agentType, 
-                                   Object output, AgentExecutionEvent.ExecutionStatus status) {
+    public void endAgentExecution(String sessionId, String agentName, String agentType,
+                                   Object output, String status) {
         AgentExecutionEvent event = AgentExecutionEvent.createEndEvent(sessionId, agentName, agentType, output, status);
         
         // 计算执行时间
@@ -104,7 +104,7 @@ public class AgentExecutionTracker {
                 .agentName(agentName)
                 .agentType("TOOL_CALL")
                 .eventType(success ? AgentExecutionEvent.EventType.TOOL_CALL_END : AgentExecutionEvent.EventType.ERROR)
-                .status(success ? AgentExecutionEvent.ExecutionStatus.SUCCESS : AgentExecutionEvent.ExecutionStatus.FAILED)
+                .status(success ? "SUCCESS" : "FAILED")
                 .startTime(callTime)
                 .endTime(completionTime)
                 .error(error)
@@ -278,13 +278,18 @@ public class AgentExecutionTracker {
         }
 
         long successCount = events.stream()
-                .filter(e -> e.getStatus() == AgentExecutionEvent.ExecutionStatus.SUCCESS)
+                .filter(this::isSuccessfulTerminalExecutionEvent)
                 .count();
         long errorCount = events.stream()
-                .filter(e -> e.getStatus() == AgentExecutionEvent.ExecutionStatus.FAILED)
+                .filter(e -> "FAILED".equals(e.getStatus())
+                        || "ERROR".equals(e.getStatus())
+                        || "TIMEOUT".equals(e.getStatus()))
                 .count();
 
         Map<String, Object> stats = new HashMap<>();
+        long terminalEventCount = events.stream()
+                .filter(this::isTerminalExecutionEvent)
+                .count();
         stats.put("totalEvents", events.size());
         stats.put("agentCount", events.stream().map(AgentExecutionEvent::getAgentName).distinct().count());
         stats.put("successCount", successCount);
@@ -297,26 +302,35 @@ public class AgentExecutionTracker {
                 .collect(Collectors.groupingBy(AgentExecutionEvent::getAgentType, Collectors.counting())));
         stats.put("eventTypeStats", events.stream()
                 .collect(Collectors.groupingBy(e -> e.getEventType().toString(), Collectors.counting())));
-        stats.put("successRate", (double) successCount / events.size() * 100);
+        stats.put("successRate", terminalEventCount == 0 ? 0.0d : (double) successCount / terminalEventCount * 100);
 
         return stats;
     }
 
+    private boolean isTerminalExecutionEvent(AgentExecutionEvent event) {
+        return event.getEventType() == AgentExecutionEvent.EventType.AGENT_END;
+    }
+
+    private boolean isSuccessfulTerminalExecutionEvent(AgentExecutionEvent event) {
+        return isTerminalExecutionEvent(event)
+                && "SUCCESS".equals(event.getStatus());
+    }
+
     // ==================== 详细执行流程追踪 ====================
 
-    public void startWorkflowTracking(String sessionId, String userInput) {
+    public void startExecutionTracking(String sessionId, String userInput) {
         DetailedExecutionFlow flow = DetailedExecutionFlow.builder()
                 .sessionId(sessionId)
                 .userInput(userInput)
                 .startTime(LocalDateTime.now())
-                .status(DetailedExecutionFlow.WorkflowStatus.RUNNING)
+                .status(DetailedExecutionFlow.FlowStatus.RUNNING)
                 .phases(new ArrayList<>())
                 .build();
         detailedFlows.put(sessionId, flow);
-        log.info("Workflow tracking started - Session: {}", sessionId);
+        log.info("Execution tracking started - Session: {}", sessionId);
     }
 
-    public void endWorkflowTracking(String sessionId, String finalResult, boolean success) {
+    public void endExecutionTracking(String sessionId, String finalResult, boolean success) {
         DetailedExecutionFlow flow = detailedFlows.get(sessionId);
         if (flow == null) {
             return;
@@ -324,24 +338,24 @@ public class AgentExecutionTracker {
         
         flow.setEndTime(LocalDateTime.now());
         flow.setFinalResult(finalResult);
-        flow.setStatus(success ? DetailedExecutionFlow.WorkflowStatus.COMPLETED : DetailedExecutionFlow.WorkflowStatus.FAILED);
+        flow.setStatus(success ? DetailedExecutionFlow.FlowStatus.COMPLETED : DetailedExecutionFlow.FlowStatus.FAILED);
         
         if (flow.getStartTime() != null) {
             flow.setTotalDuration(java.time.Duration.between(flow.getStartTime(), flow.getEndTime()).toMillis());
         }
         
-        log.info("Workflow tracking ended - Session: {}, Status: {}", sessionId, flow.getStatus());
+        log.info("Execution tracking ended - Session: {}, Status: {}", sessionId, flow.getStatus());
     }
 
     public void startPhaseTracking(String sessionId, String phaseName, DetailedExecutionFlow.PhaseType phaseType,
                                   String agentName, String agentType, Object input) {
         DetailedExecutionFlow flow = detailedFlows.computeIfAbsent(sessionId, k -> {
-            log.warn("No workflow found for session: {}, creating new one", k);
+            log.warn("No execution flow found for session: {}, creating new one", k);
             DetailedExecutionFlow newFlow = DetailedExecutionFlow.builder()
                     .sessionId(k)
                     .userInput("Unknown")
                     .startTime(LocalDateTime.now())
-                    .status(DetailedExecutionFlow.WorkflowStatus.RUNNING)
+                    .status(DetailedExecutionFlow.FlowStatus.RUNNING)
                     .phases(new ArrayList<>())
                     .build();
             return newFlow;

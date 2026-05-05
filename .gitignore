@@ -223,8 +223,8 @@ logs/
 
 # Temporary workspace files
 workspace/
+# temp/ is for temporary files that should never be committed
 temp/
-tmp/
 
 # OS specific
 Thumbs.db

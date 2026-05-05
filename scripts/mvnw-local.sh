@@ -4,8 +4,43 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+required_java_major=21
+
+read_java_spec_version() {
+  local java_cmd="$1"
+  [[ -x "$java_cmd" ]] || return 1
+
+  local version_line
+  version_line="$("$java_cmd" -XshowSettings:properties -version 2>&1 \
+    | awk -F'= ' '/^[[:space:]]*java\.specification\.version = / {print $2; exit}')"
+  version_line="${version_line%%[[:space:]]*}"
+  [[ -n "$version_line" ]] || return 1
+  printf '%s' "$version_line"
+}
+
+java_version_is_supported() {
+  local java_home="$1"
+  local version
+  version="$(read_java_spec_version "$java_home/bin/java" || true)"
+  [[ -n "$version" && "$version" =~ ^[0-9]+$ && "$version" -ge "$required_java_major" ]]
+}
+
+should_reset_surefire_reports=false
+for arg in "$@"; do
+  if [[ "$arg" == "test" ]]; then
+    should_reset_surefire_reports=true
+    break
+  fi
+done
+
+if [[ "$should_reset_surefire_reports" == true ]]; then
+  rm -rf target/surefire-reports
+fi
+
 if [[ -n "${JAVA_HOME:-}" ]]; then
   if [[ ! -x "${JAVA_HOME}/bin/java" || ! -x "${JAVA_HOME}/bin/javac" ]]; then
+    unset JAVA_HOME
+  elif ! java_version_is_supported "${JAVA_HOME}"; then
     unset JAVA_HOME
   fi
 fi
@@ -40,7 +75,8 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
       CANDIDATE_JAVA_HOME="$(cd "$(dirname "$JAVAC_REAL_PATH")/.." && pwd -P)"
       if [[ "$CANDIDATE_JAVA_HOME" != "/usr" \
             && -x "$CANDIDATE_JAVA_HOME/bin/java" \
-            && -x "$CANDIDATE_JAVA_HOME/bin/javac" ]]; then
+            && -x "$CANDIDATE_JAVA_HOME/bin/javac" ]] \
+            && java_version_is_supported "$CANDIDATE_JAVA_HOME"; then
         JAVA_HOME="$CANDIDATE_JAVA_HOME"
         export JAVA_HOME
       fi
@@ -51,6 +87,7 @@ fi
 if [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" || ! -x "${JAVA_HOME}/bin/javac" ]]; then
   echo "ERROR: JAVA_HOME is not set correctly."
   echo "Please set it before running this script."
+  echo "Required Java version: ${required_java_major}+."
   echo "Note: javac fallback requires canonical-path resolution (readlink -f or realpath)."
   echo "Examples:"
   echo "  macOS: export JAVA_HOME=\$(/usr/libexec/java_home -v 21)"

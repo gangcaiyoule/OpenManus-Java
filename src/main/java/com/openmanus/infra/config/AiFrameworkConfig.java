@@ -16,6 +16,7 @@ import com.openmanus.aiframework.parser.GeminiResponseParser;
 import com.openmanus.aiframework.parser.OpenAiResponseParser;
 import com.openmanus.aiframework.transport.HttpTransport;
 import com.openmanus.aiframework.transport.SseTransport;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -25,8 +26,11 @@ import java.util.EnumMap;
 import java.util.Locale;
 import java.util.Map;
 
+@Slf4j
 @Configuration
 public class AiFrameworkConfig {
+
+    private static final String OPENAI_FALLBACK_MODEL = "gpt-5.4";
 
     @Bean
     public HttpClient aiFrameworkHttpClient() {
@@ -51,7 +55,7 @@ public class AiFrameworkConfig {
                                      SseTransport aiFrameworkSseTransport,
                                      ObjectMapper objectMapper) {
         ProviderConfig config = resolveProviderConfig(properties, AiProviderType.OPENAI,
-                "https://api.openai.com/v1", properties.getLlm().getDefaultLlm().getModel());
+                "https://api.openai.com/v1", OPENAI_FALLBACK_MODEL);
         return new OpenAiClient(
                 config,
                 new OpenAiRequestAssembler(objectMapper),
@@ -111,8 +115,19 @@ public class AiFrameworkConfig {
                                                  AiProviderType providerType,
                                                  String defaultBaseUrl,
                                                  String fallbackModel) {
+        log.info("resolveProviderConfig: providerType={}, defaultBaseUrl={}, fallbackModel={}", providerType, defaultBaseUrl, fallbackModel);
         OpenManusProperties.LlmConfig llm = properties.getLlm();
+        if (llm == null) {
+            llm = new OpenManusProperties.LlmConfig();
+        }
         OpenManusProperties.LlmConfig.DefaultLLM defaultLlm = llm.getDefaultLlm();
+        if (defaultLlm == null) {
+            defaultLlm = new OpenManusProperties.LlmConfig.DefaultLLM();
+        }
+        log.info("resolveProviderConfig: defaultLlm.apiType={}, baseUrl={}, apiKey={}, model={}",
+                defaultLlm.getApiType(), defaultLlm.getBaseUrl(),
+                defaultLlm.getApiKey() == null ? "null" : "***",
+                defaultLlm.getModel());
         OpenManusProperties.LlmConfig.ProviderProfile profile = findProfile(llm.getProviders(), providerType);
 
         String baseUrl = nonBlank(profile == null ? null : profile.getBaseUrl(),
@@ -154,6 +169,14 @@ public class AiFrameworkConfig {
         if (profile != null) {
             return profile;
         }
+        profile = providers.entrySet().stream()
+                .filter(entry -> entry.getKey() != null && key.equalsIgnoreCase(entry.getKey().trim()))
+                .map(Map.Entry::getValue)
+                .findFirst()
+                .orElse(null);
+        if (profile != null) {
+            return profile;
+        }
         return providers.values().stream()
                 .filter(p -> p != null && key.equalsIgnoreCase(trimToEmpty(p.getApiType())))
                 .findFirst()
@@ -161,7 +184,19 @@ public class AiFrameworkConfig {
     }
 
     private boolean isDefaultProvider(OpenManusProperties.LlmConfig.DefaultLLM defaultLlm, AiProviderType providerType) {
-        return providerType.name().equalsIgnoreCase(trimToEmpty(defaultLlm.getApiType()));
+        return resolveDefaultProviderType(defaultLlm) == providerType;
+    }
+
+    private AiProviderType resolveDefaultProviderType(OpenManusProperties.LlmConfig.DefaultLLM defaultLlm) {
+        String configuredType = trimToEmpty(defaultLlm.getApiType());
+        if (configuredType.isEmpty()) {
+            return AiProviderType.OPENAI;
+        }
+        try {
+            return AiProviderType.from(configuredType);
+        } catch (IllegalArgumentException ignored) {
+            return AiProviderType.OPENAI;
+        }
     }
 
     private String nonBlank(String... values) {
