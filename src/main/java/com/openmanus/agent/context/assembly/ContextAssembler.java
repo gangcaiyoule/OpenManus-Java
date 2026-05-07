@@ -1,6 +1,5 @@
 package com.openmanus.agent.context.assembly;
 
-import com.openmanus.agent.context.compression.HistoricalContextSummarizer;
 import com.openmanus.aiframework.runtime.model.AiChatMessage;
 
 import java.util.ArrayList;
@@ -8,34 +7,20 @@ import java.util.List;
 
 /**
  * Assembles model input in one place:
- * system/history -> current user turn -> latest tool observations.
+ * full history -> current user turn -> task-state card.
  */
 public final class ContextAssembler {
 
-    private final ContextBudgetPolicy budgetPolicy;
     private final TaskStateContextInjector taskStateContextInjector;
-    private final HistoricalContextSummarizer historicalContextSummarizer;
 
-    public ContextAssembler(ContextBudgetPolicy budgetPolicy, TaskExecutionState.Budget taskStateBudget) {
-        this(
-                budgetPolicy,
-                new TaskStateContextInjector(taskStateBudget),
-                new HistoricalContextSummarizer()
-        );
+    public ContextAssembler(TaskExecutionState.Budget taskStateBudget) {
+        this(new TaskStateContextInjector(taskStateBudget));
     }
 
-    ContextAssembler(ContextBudgetPolicy budgetPolicy,
-                     TaskStateContextInjector taskStateContextInjector,
-                     HistoricalContextSummarizer historicalContextSummarizer) {
-        this.budgetPolicy = budgetPolicy == null
-                ? ContextBudgetPolicy.defaults()
-                : budgetPolicy;
+    ContextAssembler(TaskStateContextInjector taskStateContextInjector) {
         this.taskStateContextInjector = taskStateContextInjector == null
                 ? new TaskStateContextInjector()
                 : taskStateContextInjector;
-        this.historicalContextSummarizer = historicalContextSummarizer == null
-                ? new HistoricalContextSummarizer()
-                : historicalContextSummarizer;
     }
 
     public List<AiChatMessage> assemble(ContextSnapshot snapshot) {
@@ -56,34 +41,22 @@ public final class ContextAssembler {
         if (fullMessages == null || fullMessages.isEmpty()) {
             List<AiChatMessage> seedMessages = currentTurnMessages.isEmpty()
                     ? (currentUserMessage == null ? List.of() : List.of(currentUserMessage))
-                    : budgetPolicy.trimForTotalLimit(currentTurnMessages, currentUserMessage);
-            return taskStateContextInjector.inject(seedMessages, taskExecutionState, currentUserMessage, budgetPolicy);
+                    : new ArrayList<>(currentTurnMessages);
+            return taskStateContextInjector.inject(seedMessages, taskExecutionState);
         }
 
         List<AiChatMessage> result = new ArrayList<>();
         if (currentTurnMessages.isEmpty()) {
-            List<AiChatMessage> trimmedHistory = budgetPolicy.trimHistory(snapshot.historicalMessages());
-            result.addAll(historicalContextSummarizer.inject(snapshot.historicalMessages(), trimmedHistory));
+            result.addAll(snapshot.historicalMessages());
             if (currentUserMessage != null) {
                 result.add(currentUserMessage);
             }
-            return taskStateContextInjector.inject(
-                    budgetPolicy.trimForTotalLimit(result, currentUserMessage),
-                    taskExecutionState,
-                    currentUserMessage,
-                    budgetPolicy
-            );
+            return taskStateContextInjector.inject(result, taskExecutionState);
         }
 
-        List<AiChatMessage> trimmedHistory = budgetPolicy.trimHistory(snapshot.historicalMessages());
-        result.addAll(historicalContextSummarizer.inject(snapshot.historicalMessages(), trimmedHistory));
+        result.addAll(snapshot.historicalMessages());
         result.addAll(currentTurnMessages);
-        return taskStateContextInjector.inject(
-                budgetPolicy.trimForTotalLimit(result, currentUserMessage),
-                taskExecutionState,
-                currentUserMessage,
-                budgetPolicy
-        );
+        return taskStateContextInjector.inject(result, taskExecutionState);
     }
 
     private List<AiChatMessage> ensureCurrentUserAnchor(List<AiChatMessage> currentTurnMessages,

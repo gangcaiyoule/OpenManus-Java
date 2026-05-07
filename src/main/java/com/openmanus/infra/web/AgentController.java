@@ -27,10 +27,9 @@ import java.util.concurrent.CompletableFuture;
 @Tag(name = "Agent API", description = "Web API interface for intelligent agent")
 public class AgentController {
     private static final String ERROR_EMPTY_INPUT = "输入不能为空";
+    private static final String ERROR_SESSION_BUSY = "当前会话正在执行中，请稍后重试";
     private static final String ERROR_ASYNC_SUBMIT_FAILED = "任务提交失败，请稍后重试";
     private static final String ERROR_ASYNC_SUBMIT_EXCEPTION = "任务提交异常，请稍后重试";
-    private static final String EXECUTION_TOPIC_PREFIX = "/topic/executions/";
-
     private final ConversationApplicationService conversationApplicationService;
     private final ExecutionStreamingApplicationService executionStreamingApplicationService;
     private final SandboxSessionApplicationService sandboxSessionApplicationService;
@@ -98,7 +97,10 @@ public class AgentController {
     public ResponseEntity<ExecutionStreamResponse> executionStream(
             @RequestBody ExecutionRequest executionRequest) {
         String userInput = executionRequest.getInput();
-        ExecutionResponse serviceResult = executionStreamingApplicationService.executeAndStreamEvents(userInput);
+        ExecutionResponse serviceResult = executionStreamingApplicationService.executeAndStreamEvents(
+                userInput,
+                executionRequest.getSessionId()
+        );
 
         if (!serviceResult.isSuccess()) {
             HttpStatus status = resolveErrorStatus(serviceResult.getErrorCode(), serviceResult.getError());
@@ -122,17 +124,25 @@ public class AgentController {
         ExecutionStreamResponse.ExecutionStreamResponseBuilder builder = ExecutionStreamResponse.builder()
                 .success(serviceResult.isSuccess())
                 .sessionId(serviceResult.getSessionId())
+                .executionId(serviceResult.getExecutionId())
                 .error(serviceResult.getError())
                 .errorCode(serviceResult.getErrorCode());
-        if (serviceResult.isSuccess() && serviceResult.getSessionId() != null) {
-            builder.topic(EXECUTION_TOPIC_PREFIX + serviceResult.getSessionId());
+        if (serviceResult.isSuccess() && serviceResult.getSessionId() != null && serviceResult.getExecutionId() != null) {
+            builder.topic(executionTopic(serviceResult.getSessionId(), serviceResult.getExecutionId()));
         }
         return builder.build();
+    }
+
+    private static String executionTopic(String sessionId, String executionId) {
+        return "/topic/executions/" + sessionId + "/" + executionId;
     }
 
     private HttpStatus resolveErrorStatus(String errorCode, String error) {
         if (ExecutionErrorCodes.INPUT_INVALID.equals(errorCode)) {
             return HttpStatus.BAD_REQUEST;
+        }
+        if (ExecutionErrorCodes.SESSION_BUSY.equals(errorCode)) {
+            return HttpStatus.CONFLICT;
         }
         if (ExecutionErrorCodes.ASYNC_SUBMIT_REJECTED.equals(errorCode)
                 || ExecutionErrorCodes.ASYNC_SUBMIT_EXCEPTION.equals(errorCode)) {
@@ -145,6 +155,9 @@ public class AgentController {
         // Backward-compatible fallback for payloads without errorCode.
         if (ERROR_EMPTY_INPUT.equals(error)) {
             return HttpStatus.BAD_REQUEST;
+        }
+        if (ERROR_SESSION_BUSY.equals(error)) {
+            return HttpStatus.CONFLICT;
         }
         if (ERROR_ASYNC_SUBMIT_FAILED.equals(error) || ERROR_ASYNC_SUBMIT_EXCEPTION.equals(error)) {
             return HttpStatus.SERVICE_UNAVAILABLE;
@@ -193,6 +206,9 @@ public class AgentController {
     private String inferChatErrorCode(String errorMessage) {
         if ("message不能为空".equals(errorMessage)) {
             return ExecutionErrorCodes.INPUT_INVALID;
+        }
+        if (ERROR_SESSION_BUSY.equals(errorMessage)) {
+            return ExecutionErrorCodes.SESSION_BUSY;
         }
         return ExecutionErrorCodes.INTERNAL_ERROR;
     }

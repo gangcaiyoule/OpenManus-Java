@@ -179,11 +179,6 @@ public class AgentArchitectureConfig {
                 .aiChatModel(chatModel)
                 .aiMemoryProvider(chatMemoryProvider)
                 .sessionSandboxGateway(sessionSandboxGateway)
-                .modelContextMaxMessages(properties.getChatMemory().getModelContextMaxMessages())
-                .modelContextMaxTotalMessages(properties.getChatMemory().getModelContextMaxTotalMessages())
-                .modelContextMaxApproxTokens(properties.getChatMemory().getModelContextMaxApproxTokens())
-                .modelContextTokenCountMode(properties.getChatMemory().getModelContextTokenCountMode())
-                .modelContextTokenizerModel(resolveModelContextTokenizerModel(properties))
                 .maxIterations(properties.getChatMemory().getReactMaxIterations())
                 .maxExecutionSeconds(properties.getChatMemory().getReactMaxExecutionSeconds())
                 .repeatedToolCallThreshold(properties.getChatMemory().getReactRepeatedToolCallThreshold())
@@ -217,14 +212,6 @@ public class AgentArchitectureConfig {
                 taskReflectionTool
         );
         return builder.build();
-    }
-
-    private static String resolveModelContextTokenizerModel(OpenManusProperties properties) {
-        if (properties == null || properties.getLlm() == null || properties.getLlm().getDefaultLlm() == null) {
-            return "";
-        }
-        String model = properties.getLlm().getDefaultLlm().getModel();
-        return model == null ? "" : model.trim();
     }
 
     private static void registerMcpTools(

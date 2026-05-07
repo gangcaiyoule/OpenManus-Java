@@ -272,36 +272,6 @@ public class OpenManusProperties {
                             quarantine, chatMemory.isQuarantineCorruptedFiles()));
                 }
             }
-            if (chatMemory.modelContextMaxMessages == null) {
-                String contextMaxMessages = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_MESSAGES");
-                if (!isBlank(contextMaxMessages)) {
-                    chatMemory.setModelContextMaxMessages(parseNonNegativeInt(
-                            contextMaxMessages, chatMemory.getModelContextMaxMessages()));
-                }
-            }
-            if (chatMemory.modelContextMaxTotalMessages == null) {
-                String totalContextMaxMessages = firstNonBlankEnv(
-                        "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_TOTAL_MESSAGES");
-                if (!isBlank(totalContextMaxMessages)) {
-                    chatMemory.setModelContextMaxTotalMessages(parseNonNegativeInt(
-                            totalContextMaxMessages, chatMemory.getModelContextMaxTotalMessages()));
-                }
-            }
-            if (chatMemory.modelContextMaxApproxTokens == null) {
-                String approxTokens = firstNonBlankEnv(
-                        "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_APPROX_TOKENS");
-                if (!isBlank(approxTokens)) {
-                    chatMemory.setModelContextMaxApproxTokens(parseNonNegativeInt(
-                            approxTokens, chatMemory.getModelContextMaxApproxTokens()));
-                }
-            }
-            if (isBlank(chatMemory.getModelContextTokenCountModeRaw())) {
-                String countMode = firstNonBlankEnv(
-                        "OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_TOKEN_COUNT_MODE");
-                if (!isBlank(countMode)) {
-                    chatMemory.setModelContextTokenCountMode(countMode);
-                }
-            }
             if (chatMemory.reactMaxIterations == null) {
                 String reactMaxIterations = firstNonBlankEnv("OPENMANUS_CHAT_MEMORY_REACT_MAX_ITERATIONS");
                 if (!isBlank(reactMaxIterations)) {
@@ -405,10 +375,6 @@ public class OpenManusProperties {
                 if (!isBlank(shellTimeout)) {
                     chatMemory.setShellToolTimeoutSeconds(parsePositiveInt(shellTimeout, chatMemory.getShellToolTimeoutSeconds()));
                 }
-            }
-            if (chatMemory.getModelContextMaxTotalMessages() == 1) {
-                log.warn("openmanus.chat-memory.model-context-max-total-messages=1 is an extreme mode; "
-                        + "current user continuity is prioritized and system/history may be dropped for that round.");
             }
         }
 
@@ -696,10 +662,6 @@ public class OpenManusProperties {
                 System.getProperty("java.io.tmpdir") + "/openmanus/chat-memory";
         private static final int DEFAULT_RETENTION_DAYS = 30;
         private static final boolean DEFAULT_QUARANTINE_CORRUPTED_FILES = true;
-        private static final int DEFAULT_MODEL_CONTEXT_MAX_MESSAGES = 0;
-        private static final int DEFAULT_MODEL_CONTEXT_MAX_TOTAL_MESSAGES = 0;
-        private static final int DEFAULT_MODEL_CONTEXT_MAX_APPROX_TOKENS = 128000;
-        private static final String DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE = "approx";
         private static final int DEFAULT_REACT_MAX_ITERATIONS = 0;
         private static final int DEFAULT_REACT_MAX_EXECUTION_SECONDS = 0;
         private static final int DEFAULT_REACT_REPEATED_TOOL_CALL_THRESHOLD = 0;
@@ -733,27 +695,6 @@ public class OpenManusProperties {
          * Move corrupted JSON files into quarantine directory before failing read.
          */
         private Boolean quarantineCorruptedFiles = null;
-        /**
-         * Max number of historical messages sent to model each round.
-         * 0 means unlimited.
-         */
-        private Integer modelContextMaxMessages = null;
-        /**
-         * Max total messages sent to model each round.
-         * 0 means unlimited.
-         * 1 means keep only the most critical message in current turn (typically current user message).
-         */
-        private Integer modelContextMaxTotalMessages = null;
-        /**
-         * Max approximate token budget sent to model each round.
-         * 0 means unlimited.
-         */
-        private Integer modelContextMaxApproxTokens = null;
-        /**
-         * Token-count mode used by model-context budget.
-         * Supported values: approx | tokenizer.
-         */
-        private String modelContextTokenCountMode = "";
         /**
          * Max ReAct loop iterations for one execute. 0 means unlimited.
          */
@@ -821,32 +762,6 @@ public class OpenManusProperties {
 
         public boolean isQuarantineCorruptedFiles() {
             return quarantineCorruptedFiles == null ? DEFAULT_QUARANTINE_CORRUPTED_FILES : quarantineCorruptedFiles;
-        }
-
-        public int getModelContextMaxMessages() {
-            return modelContextMaxMessages == null
-                    ? DEFAULT_MODEL_CONTEXT_MAX_MESSAGES
-                    : modelContextMaxMessages;
-        }
-
-        public int getModelContextMaxTotalMessages() {
-            return modelContextMaxTotalMessages == null
-                    ? DEFAULT_MODEL_CONTEXT_MAX_TOTAL_MESSAGES
-                    : modelContextMaxTotalMessages;
-        }
-
-        public int getModelContextMaxApproxTokens() {
-            return modelContextMaxApproxTokens == null
-                    ? DEFAULT_MODEL_CONTEXT_MAX_APPROX_TOKENS
-                    : modelContextMaxApproxTokens;
-        }
-
-        public String getModelContextTokenCountMode() {
-            return normalizeModelContextTokenCountMode(modelContextTokenCountMode);
-        }
-
-        String getModelContextTokenCountModeRaw() {
-            return modelContextTokenCountMode;
         }
 
         public int getReactMaxIterations() {
@@ -935,33 +850,6 @@ public class OpenManusProperties {
             return shellToolTimeoutSeconds == null ? DEFAULT_SHELL_TOOL_TIMEOUT_SECONDS : shellToolTimeoutSeconds;
         }
 
-        /**
-         * Negative values are treated as unlimited (0) to avoid invalid explicit config leaking into runtime.
-         */
-        public void setModelContextMaxMessages(Integer modelContextMaxMessages) {
-            this.modelContextMaxMessages = clampNonNegativeOrNull(modelContextMaxMessages);
-        }
-
-        /**
-         * Negative values are treated as unlimited (0) to avoid invalid explicit config leaking into runtime.
-         */
-        public void setModelContextMaxTotalMessages(Integer modelContextMaxTotalMessages) {
-            this.modelContextMaxTotalMessages = clampNonNegativeOrNull(modelContextMaxTotalMessages);
-        }
-
-        /**
-         * Negative values are treated as unlimited (0).
-         */
-        public void setModelContextMaxApproxTokens(Integer modelContextMaxApproxTokens) {
-            this.modelContextMaxApproxTokens = clampNonNegativeOrNull(modelContextMaxApproxTokens);
-        }
-
-        public void setModelContextTokenCountMode(String modelContextTokenCountMode) {
-            this.modelContextTokenCountMode = modelContextTokenCountMode == null
-                    ? ""
-                    : modelContextTokenCountMode.trim();
-        }
-
         public void setReactMaxIterations(Integer reactMaxIterations) {
             this.reactMaxIterations = clampNonNegativeOrNull(reactMaxIterations);
         }
@@ -1024,16 +912,6 @@ public class OpenManusProperties {
             return value < 0 ? 0 : value;
         }
 
-        private static String normalizeModelContextTokenCountMode(String value) {
-            if (value == null || value.isBlank()) {
-                return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
-            }
-            String normalized = value.trim().toLowerCase(Locale.ROOT);
-            if ("tokenizer".equals(normalized)) {
-                return normalized;
-            }
-            return DEFAULT_MODEL_CONTEXT_TOKEN_COUNT_MODE;
-        }
     }
 
     /**

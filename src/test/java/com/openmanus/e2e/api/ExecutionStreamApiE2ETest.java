@@ -34,8 +34,11 @@ class ExecutionStreamApiE2ETest extends RealApiE2ETestBase implements E2ETest {
 
         assertThat(startResponse.path("success").asBoolean()).isTrue();
         String sessionId = startResponse.path("sessionId").asText();
+        String executionId = startResponse.path("executionId").asText();
         assertThat(sessionId).isNotBlank();
-        assertThat(startResponse.path("topic").asText()).isEqualTo("/topic/executions/" + sessionId);
+        assertThat(executionId).isNotBlank();
+        assertThat(startResponse.path("topic").asText())
+                .isEqualTo("/topic/executions/" + sessionId + "/" + executionId);
 
         List<AgentExecutionEvent> events = waitForSessionEvents(sessionId, hasTerminalExecutionEvent());
 

@@ -22,7 +22,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 
 /**
- * Proxies frontend page requests to the Vite dev server and falls back to packaged front/dist assets.
+ * Proxies frontend page requests to the Vite dev server and falls back to packaged frontend/dist assets.
  */
 @Controller
 public class FrontendProxyController {
@@ -129,7 +129,7 @@ public class FrontendProxyController {
             <h1>Frontend unavailable</h1>
             <p>The backend is running, but no frontend bundle or dev server is currently reachable.</p>
             <p>Expected dev server: <code>%s</code></p>
-            <p>To recover, either start <code>front/</code> with <code>npm run dev</code> or build the frontend so packaged assets are available.</p>
+            <p>To recover, either start <code>frontend/</code> with <code>npm run dev</code> or build the frontend so packaged assets are available.</p>
           </main>
         </body>
         </html>

@@ -15,7 +15,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 /**
- * Starts the local front/ Vite dev server with the Spring Boot web application.
+ * Starts the local frontend/ Vite dev server with the Spring Boot web application.
  */
 @Component
 public class FrontendDevServerLifecycle {
@@ -35,9 +35,9 @@ public class FrontendDevServerLifecycle {
    */
   @EventListener(ApplicationReadyEvent.class)
   public synchronized void start() {
-    Path frontDir = Path.of(System.getProperty("user.dir"), "front");
-    if (!Files.isRegularFile(frontDir.resolve("package.json"))) {
-      log.info("Front directory not found, skipping frontend dev server startup: {}", frontDir);
+    Path frontendDir = Path.of(System.getProperty("user.dir"), "frontend");
+    if (!Files.isRegularFile(frontendDir.resolve("package.json"))) {
+      log.info("Frontend directory not found, skipping frontend dev server startup: {}", frontendDir);
       return;
     }
     URI devServerUri = resolveDevServerUri();
@@ -57,12 +57,12 @@ public class FrontendDevServerLifecycle {
           "--port", Integer.toString(resolvePort(devServerUri)),
           "--strictPort"
       ))
-          .directory(frontDir.toFile())
+          .directory(frontendDir.toFile())
           .inheritIO()
           .start();
-      log.info("Started frontend dev server from {} at {}", frontDir, devServerUri);
+      log.info("Started frontend dev server from {} at {}", frontendDir, devServerUri);
     } catch (IOException e) {
-      log.warn("Failed to start frontend dev server from {}", frontDir, e);
+      log.warn("Failed to start frontend dev server from {}", frontendDir, e);
     }
   }
 

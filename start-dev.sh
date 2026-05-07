@@ -9,8 +9,8 @@ echo "Starting OpenManus Frontend & Backend..."
 lsof -ti :5173 | xargs kill -9 2>/dev/null || true
 lsof -ti :8089 | xargs kill -9 2>/dev/null || true
 
-# Start Spring Boot in background. The web application starts front/ Vite.
-echo "Starting Spring Boot and front/ Vite (8089)..."
+# Start Spring Boot in background. The web application starts frontend/ Vite.
+echo "Starting Spring Boot and frontend/ Vite (8089)..."
 ./scripts/mvnw-local.sh -q clean spring-boot:run -DskipTests &
 SPRING_PID=$!
 

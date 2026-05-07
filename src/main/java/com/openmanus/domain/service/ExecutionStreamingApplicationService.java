@@ -23,20 +23,24 @@ public class ExecutionStreamingApplicationService {
     private static final String EXECUTION_START = "EXECUTION_START";
     private static final String EXECUTION_COMPLETE = "EXECUTION_COMPLETE";
     private static final String EXECUTION_ERROR = "EXECUTION_ERROR";
+    private static final String SESSION_BUSY_MESSAGE = "当前会话正在执行中，请稍后重试";
 
     private final AgentExecutionPort agentExecutionPort;
     private final ExecutionEventPort executionEventPort;
     private final ExecutionStreamPublisher streamPublisher;
     private final Executor asyncExecutor; // 注入自定义线程池
+    private final SessionExecutionGuard sessionExecutionGuard;
 
     public ExecutionStreamingApplicationService(AgentExecutionPort agentExecutionPort,
                                                 ExecutionEventPort executionEventPort,
                                                 ExecutionStreamPublisher streamPublisher,
-                                                Executor asyncExecutor) {
+                                                Executor asyncExecutor,
+                                                SessionExecutionGuard sessionExecutionGuard) {
         this.agentExecutionPort = agentExecutionPort;
         this.executionEventPort = executionEventPort;
         this.streamPublisher = streamPublisher;
         this.asyncExecutor = asyncExecutor;
+        this.sessionExecutionGuard = sessionExecutionGuard;
     }
 
     /**
@@ -45,7 +49,7 @@ public class ExecutionStreamingApplicationService {
      * @param userInput 用户输入
      * @return 包含 sessionId 的 ExecutionResponse，用于客户端订阅
      */
-    public ExecutionResponse executeAndStreamEvents(String userInput) {
+    public ExecutionResponse executeAndStreamEvents(String userInput, String requestedSessionId) {
         if (userInput == null || userInput.trim().isEmpty()) {
             return ExecutionResponse.builder()
                     .success(false)
@@ -54,7 +58,17 @@ public class ExecutionStreamingApplicationService {
                     .build();
         }
 
-        String sessionId = resolveSessionId();
+        String sessionId = resolveSessionId(requestedSessionId);
+        if (!sessionExecutionGuard.tryAcquire(sessionId)) {
+            return ExecutionResponse.builder()
+                    .success(false)
+                    .sessionId(sessionId)
+                    .error(SESSION_BUSY_MESSAGE)
+                    .errorCode(ExecutionErrorCodes.SESSION_BUSY)
+                    .build();
+        }
+        String executionId = UUID.randomUUID().toString();
+        String executionTopic = executionTopic(sessionId, executionId);
 
         final String currentSessionId = sessionId;
 
@@ -63,15 +77,17 @@ public class ExecutionStreamingApplicationService {
                 return;
             }
             log.debug("Sending event for session {}: {}", currentSessionId, event);
-            streamPublisher.publishEvent(currentSessionId, event);
+            streamPublisher.publishEvent(executionTopic, event);
         };
         try {
             executionEventPort.addListener(currentSessionId, listener);
         } catch (RuntimeException e) {
+            sessionExecutionGuard.release(sessionId);
             log.error("监听器注册异常: sessionId={}", sessionId, e);
             return ExecutionResponse.builder()
                     .success(false)
                     .sessionId(sessionId)
+                    .executionId(executionId)
                     .error("内部错误，请稍后重试")
                     .errorCode(ExecutionErrorCodes.INTERNAL_ERROR)
                     .build();
@@ -80,22 +96,27 @@ public class ExecutionStreamingApplicationService {
         try {
             // 直接使用注入的Executor来异步执行任务
             final String finalSessionId = sessionId;
-            asyncExecutor.execute(() -> executeExecutionInternal(userInput, finalSessionId, listener));
+            final String finalExecutionTopic = executionTopic;
+            asyncExecutor.execute(() -> executeExecutionInternal(userInput, finalSessionId, finalExecutionTopic, listener));
         } catch (RejectedExecutionException e) {
             removeListenerSafely(currentSessionId, listener);
+            sessionExecutionGuard.release(sessionId);
             log.error("异步任务提交失败: sessionId={}", sessionId, e);
             return ExecutionResponse.builder()
                     .success(false)
                     .sessionId(sessionId)
+                    .executionId(executionId)
                     .error("任务提交失败，请稍后重试")
                     .errorCode(ExecutionErrorCodes.ASYNC_SUBMIT_REJECTED)
                     .build();
         } catch (RuntimeException e) {
             removeListenerSafely(currentSessionId, listener);
+            sessionExecutionGuard.release(sessionId);
             log.error("异步任务提交异常: sessionId={}", sessionId, e);
             return ExecutionResponse.builder()
                     .success(false)
                     .sessionId(sessionId)
+                    .executionId(executionId)
                     .error("任务提交异常，请稍后重试")
                     .errorCode(ExecutionErrorCodes.ASYNC_SUBMIT_EXCEPTION)
                     .build();
@@ -104,6 +125,7 @@ public class ExecutionStreamingApplicationService {
         return ExecutionResponse.builder()
                 .success(true)
                 .sessionId(sessionId)
+                .executionId(executionId)
                 .build();
     }
 
@@ -113,7 +135,10 @@ public class ExecutionStreamingApplicationService {
      * @param sessionId 会话ID
      * @param listener 事件监听器
      */
-    public void executeExecutionInternal(String userInput, String sessionId, ExecutionEventPort.Listener listener) {
+    public void executeExecutionInternal(String userInput,
+                                         String sessionId,
+                                         String executionTopic,
+                                         ExecutionEventPort.Listener listener) {
         final LocalDateTime startTime = LocalDateTime.now();
 
         try (MDC.MDCCloseable ignored = MDC.putCloseable(SESSION_ID_KEY, sessionId)) {
@@ -134,7 +159,7 @@ public class ExecutionStreamingApplicationService {
             LocalDateTime endTime = LocalDateTime.now();
             long executionTimeMs = ChronoUnit.MILLIS.between(startTime, endTime);
             log.info("Execution completed: sessionId={}, durationMs={}", sessionId, executionTimeMs);
-            sendExecutionResult(sessionId, userInput, result, "SUCCESS", endTime, executionTimeMs);
+            sendExecutionResult(executionTopic, sessionId, userInput, result, "SUCCESS", endTime, executionTimeMs);
 
         } catch (RuntimeException e) {
             Throwable actualError = unwrapException(e);
@@ -151,7 +176,7 @@ public class ExecutionStreamingApplicationService {
             );
 
             long executionTimeMs = ChronoUnit.MILLIS.between(startTime, LocalDateTime.now());
-            sendExecutionResult(sessionId, userInput, "执行出错: " + errorMessage, "ERROR", LocalDateTime.now(), executionTimeMs);
+            sendExecutionResult(executionTopic, sessionId, userInput, "执行出错: " + errorMessage, "ERROR", LocalDateTime.now(), executionTimeMs);
         } finally {
             try {
                 long delayMs = postExecutionDrainDelayMs();
@@ -164,6 +189,7 @@ public class ExecutionStreamingApplicationService {
             
             log.debug("Execution cleanup: sessionId={}", sessionId);
             removeListenerSafely(sessionId, listener);
+            sessionExecutionGuard.release(sessionId);
         }
     }
 
@@ -174,7 +200,7 @@ public class ExecutionStreamingApplicationService {
     /**
      * 发送执行结果。
      */
-    private void sendExecutionResult(String sessionId, String userInput, String result,
+    private void sendExecutionResult(String executionTopic, String sessionId, String userInput, String result,
                                      String status, LocalDateTime completedTime, long executionTimeMs) {
         ExecutionResultView resultVO = ExecutionResultView.builder()
                 .sessionId(sessionId)
@@ -187,19 +213,22 @@ public class ExecutionStreamingApplicationService {
 
         try {
             log.debug("发送执行结果: sessionId={}", sessionId);
-            streamPublisher.publishResult(sessionId, resultVO);
+            streamPublisher.publishResult(executionTopic, resultVO);
         } catch (Exception e) {
             log.debug("无法发送结果到会话 {}: {}", sessionId, e.getMessage());
         }
     }
 
-    private String resolveSessionId() {
-        String sessionId = normalizeSessionId(MDC.get(SESSION_ID_KEY));
-        if (sessionId == null) {
-            log.warn("MDC中未找到有效sessionId，将生成一个新的。请检查拦截器配置。");
-            return UUID.randomUUID().toString();
+    private String resolveSessionId(String requestedSessionId) {
+        String normalized = normalizeSessionId(requestedSessionId);
+        if (normalized != null) {
+            return normalized;
         }
-        return sessionId;
+        return UUID.randomUUID().toString();
+    }
+
+    private static String executionTopic(String sessionId, String executionId) {
+        return "/topic/executions/" + sessionId + "/" + executionId;
     }
 
     static String normalizeSessionId(String rawSessionId) {

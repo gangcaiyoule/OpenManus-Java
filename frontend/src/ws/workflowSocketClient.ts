@@ -104,7 +104,9 @@ export class WorkflowSocketClient {
 function defaultClientFactory(): StompLike {
   const client = new Client({
     webSocketFactory: () => new SockJS('/ws'),
-    reconnectDelay: 0,
+    reconnectDelay: 5000,
+    heartbeatIncoming: 10000,
+    heartbeatOutgoing: 10000,
     debug: () => {
       // silent
     }

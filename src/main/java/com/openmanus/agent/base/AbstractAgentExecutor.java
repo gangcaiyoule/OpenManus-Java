@@ -2,11 +2,9 @@ package com.openmanus.agent.base;
 
 import com.openmanus.agent.context.ToolResultBudget;
 import com.openmanus.agent.context.assembly.ContextAssembler;
-import com.openmanus.agent.context.assembly.ContextBudgetPolicy;
 import com.openmanus.agent.context.assembly.ContextSnapshot;
 import com.openmanus.agent.context.assembly.TaskExecutionState;
 import com.openmanus.agent.context.assembly.TaskExecutionStateTracker;
-import com.openmanus.agent.context.token.ModelContextTokenCounter;
 import com.openmanus.aiframework.runtime.AiChatModel;
 import com.openmanus.aiframework.runtime.AiMemory;
 import com.openmanus.aiframework.runtime.AiMemoryProvider;
@@ -49,11 +47,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         AiChatModel aiChatModel;
         String systemMessage;
         AiMemoryProvider aiMemoryProvider;
-        int modelContextMaxMessages = 0;
-        int modelContextMaxTotalMessages = 0;
-        int modelContextMaxApproxTokens = 0;
-        String modelContextTokenCountMode = ModelContextTokenCounter.MODE_APPROX;
-        String modelContextTokenizerModel = "";
         int maxIterations = 0;
         int maxExecutionSeconds = 0;
         int repeatedToolCallThreshold = 0;
@@ -92,50 +85,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
          */
         public B aiMemoryProvider(AiMemoryProvider aiMemoryProvider) {
             this.aiMemoryProvider = aiMemoryProvider;
-            return result();
-        }
-
-        /**
-         * Limits how many historical messages are sent to the model each round.
-         * 0 means unlimited (default).
-         */
-        public B modelContextMaxMessages(int maxMessages) {
-            this.modelContextMaxMessages = Math.max(0, maxMessages);
-            return result();
-        }
-
-        /**
-         * Limits total messages sent to model each round (history + current-turn messages).
-         * 0 means unlimited (default).
-         */
-        public B modelContextMaxTotalMessages(int maxMessages) {
-            this.modelContextMaxTotalMessages = Math.max(0, maxMessages);
-            return result();
-        }
-
-        /**
-         * Limits approximate token budget for model input each round.
-         * 0 means unlimited (default).
-         */
-        public B modelContextMaxApproxTokens(int maxApproxTokens) {
-            this.modelContextMaxApproxTokens = Math.max(0, maxApproxTokens);
-            return result();
-        }
-
-        /**
-         * Sets token counting mode for context budgeting.
-         * Supported values: approx | tokenizer.
-         */
-        public B modelContextTokenCountMode(String mode) {
-            this.modelContextTokenCountMode = ModelContextTokenCounter.normalizeMode(mode);
-            return result();
-        }
-
-        /**
-         * Configured model name used by tokenizer mode encoding mapping.
-         */
-        public B modelContextTokenizerModel(String modelName) {
-            this.modelContextTokenizerModel = modelName == null ? "" : modelName.trim();
             return result();
         }
 
@@ -283,18 +232,12 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
     private final AiChatModel aiChatModel;
     private final String systemMessage;
     private final AiMemoryProvider aiMemoryProvider;
-    private final int modelContextMaxMessages;
-    private final int modelContextMaxTotalMessages;
-    private final int modelContextMaxApproxTokens;
-    private final String modelContextTokenCountMode;
-    private final String modelContextTokenizerModel;
     private final int maxIterations;
     private final int maxExecutionSeconds;
     private final int repeatedToolCallThreshold;
     private final TaskExecutionState.Budget taskStateBudget;
     private final ToolResultBudget toolResultBudget;
     private final ExecutionEventPort executionEventPort;
-    private final ContextBudgetPolicy contextBudgetPolicy;
     private final ContextAssembler contextAssembler;
     private final Map<String, AiRegisteredTool> tools;
     private final List<AiToolSpec> toolSpecifications;
@@ -307,14 +250,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         this.aiChatModel = resolveAiChatModel(builder);
         this.systemMessage = builder.systemMessage;
         this.aiMemoryProvider = builder.aiMemoryProvider;
-        this.modelContextMaxMessages = builder.modelContextMaxMessages;
-        this.modelContextMaxTotalMessages = builder.modelContextMaxTotalMessages;
-        this.modelContextMaxApproxTokens = builder.modelContextMaxApproxTokens;
-        this.modelContextTokenCountMode = ModelContextTokenCounter.normalizeMode(
-                builder.modelContextTokenCountMode);
-        this.modelContextTokenizerModel = builder.modelContextTokenizerModel == null
-                ? ""
-                : builder.modelContextTokenizerModel.trim();
         this.maxIterations = builder.maxIterations;
         this.maxExecutionSeconds = builder.maxExecutionSeconds;
         this.repeatedToolCallThreshold = builder.repeatedToolCallThreshold;
@@ -334,16 +269,7 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                 builder.toolResultBudgetDecayChars
         );
         this.executionEventPort = builder.executionEventPort;
-        this.contextBudgetPolicy = new ContextBudgetPolicy(
-                this.modelContextMaxMessages,
-                this.modelContextMaxTotalMessages,
-                this.modelContextMaxApproxTokens,
-                ModelContextTokenCounter.create(
-                        this.modelContextTokenCountMode,
-                        this.modelContextTokenizerModel
-                )
-        );
-        this.contextAssembler = new ContextAssembler(this.contextBudgetPolicy, this.taskStateBudget);
+        this.contextAssembler = new ContextAssembler(this.taskStateBudget);
         this.tools = Collections.unmodifiableMap(new HashMap<>(builder.tools));
         this.toolSpecifications = AiToolRegistry.toRuntimeToolSpecifications(this.tools.values());
     }
@@ -419,15 +345,14 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                     userMessage,
                     taskExecutionState
             );
-            List<AiChatMessage> modelMessages = applyApproxTokenBudget(modelMessagesBeforeBudget, userMessage);
-            logContextGovernance(
+            logModelRequestSnapshot(
                     i + 1,
-                    modelMessagesBeforeBudget,
-                    modelMessages
+                    modelMessagesBeforeBudget
             );
+            validateToolCallProtocol(i + 1, modelMessagesBeforeBudget);
             AiChatRequest runtimeRequest = new AiChatRequest(
                     "",
-                    modelMessages,
+                    modelMessagesBeforeBudget,
                     toolSpecifications,
                     null,
                     null,
@@ -443,10 +368,10 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
                     null,
                     Map.of(
                             "iteration", i + 1,
-                            "messageCount", modelMessages.size(),
+                            "messageCount", modelMessagesBeforeBudget.size(),
                             "toolCount", toolSpecifications.size()
                     ),
-                    modelRequestSummary(modelMessages)
+                    modelRequestSummary(modelMessagesBeforeBudget)
             );
             AiChatResponse runtimeResponse = aiChatModel.chat(runtimeRequest);
             if (runtimeResponse == null || runtimeResponse.message() == null) {
@@ -690,21 +615,6 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         return contextAssembler.assemble(snapshot, taskExecutionState);
     }
 
-    private List<AiChatMessage> applyApproxTokenBudget(List<AiChatMessage> messages,
-                                                        AiChatMessage currentUserMessage) {
-        if (messages == null || messages.isEmpty() || modelContextMaxApproxTokens <= 0) {
-            return messages == null ? List.of() : new ArrayList<>(messages);
-        }
-        List<AiChatMessage> budgetedRuntimeMessages = contextBudgetPolicy.applyApproxTokenBudget(
-                messages,
-                currentUserMessage
-        );
-        if (budgetedRuntimeMessages == null || budgetedRuntimeMessages.isEmpty()) {
-            return tail(messages, 1);
-        }
-        return new ArrayList<>(budgetedRuntimeMessages);
-    }
-
     private static String toolBatchFingerprint(List<AiToolCall> requests) {
         return requests.stream()
                 .map(request -> request.name() + "|" + String.valueOf(request.arguments()))
@@ -836,58 +746,53 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         return locks;
     }
 
-    private void logContextGovernance(int iteration,
-                                      List<AiChatMessage> beforeBudget,
-                                      List<AiChatMessage> finalMessages) {
+    private void logModelRequestSnapshot(int iteration,
+                                         List<AiChatMessage> messages) {
         if (!log.isDebugEnabled()) {
             return;
         }
         log.debug(
-                "context_governance iter={} base.count={} base.tokens~={} "
-                        + "final.count={} final.tokens~={} final.tool_result_stubs={}",
+                "model_request_snapshot iter={} message.count={} tool_result_blocks={} tool_result_stubs={}",
                 iteration,
-                sizeOf(beforeBudget),
-                estimateApproxTokens(beforeBudget),
-                sizeOf(finalMessages),
-                estimateApproxTokens(finalMessages),
-                countToolResultStubs(finalMessages)
+                sizeOf(messages),
+                countToolResultBlocks(messages),
+                countToolResultStubs(messages)
         );
+    }
+
+    private void validateToolCallProtocol(int iteration, List<AiChatMessage> messages) {
+        List<String> violations = findToolCallProtocolViolations(messages);
+        if (violations.isEmpty()) {
+            return;
+        }
+        log.error(
+                "tool_call_protocol_violation iter={} violations={} sequence={}",
+                iteration,
+                violations,
+                modelRequestSummary(messages)
+        );
+        throw new IllegalStateException("Invalid tool-call message sequence before provider request: "
+                + String.join("; ", violations));
     }
 
     private static int sizeOf(List<AiChatMessage> messages) {
         return messages == null ? 0 : messages.size();
     }
 
-    private static int estimateApproxTokens(List<AiChatMessage> messages) {
+    private static int countToolResultBlocks(List<AiChatMessage> messages) {
         if (messages == null || messages.isEmpty()) {
             return 0;
         }
-        int total = 0;
+        int count = 0;
         for (AiChatMessage message : messages) {
-            total += estimateApproxTokens(message);
+            if (message != null
+                    && message.role() == AiChatMessage.Role.ASSISTANT
+                    && message.toolCalls() != null
+                    && !message.toolCalls().isEmpty()) {
+                count++;
+            }
         }
-        return total;
-    }
-
-    private static int estimateApproxTokens(AiChatMessage message) {
-        String text = extractTextForBudgetLog(message);
-        if (text == null || text.isEmpty()) {
-            return 8;
-        }
-        return 8 + (text.length() + 3) / 4;
-    }
-
-    private static String extractTextForBudgetLog(AiChatMessage message) {
-        if (message == null) {
-            return "";
-        }
-        if (message.role() == AiChatMessage.Role.ASSISTANT
-                && (message.content() == null || message.content().isBlank())
-                && message.toolCalls() != null
-                && !message.toolCalls().isEmpty()) {
-            return message.toolCalls().toString();
-        }
-        return message.content() == null ? "" : message.content();
+        return count;
     }
 
     private static int countToolResultStubs(List<AiChatMessage> messages) {
@@ -955,6 +860,35 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         event.setInput(input);
         event.setOutput(output);
         executionEventPort.recordCustomEvent(event);
+        logKeyEvent(memoryId, eventType, agentName, status, input, output);
+    }
+
+    private void logKeyEvent(Object memoryId,
+                             AgentExecutionEvent.EventType eventType,
+                             String agentName,
+                             String status,
+                             Object input,
+                             Object output) {
+        if (eventType == null || memoryId == null) {
+            return;
+        }
+        if (eventType == AgentExecutionEvent.EventType.LLM_RESPONSE) {
+            log.info("llm_response sessionId={} status={} output={}",
+                    memoryId,
+                    status,
+                    summarize(String.valueOf(output), 240));
+            return;
+        }
+        if (eventType == AgentExecutionEvent.EventType.TOOL_CALL_START
+                || eventType == AgentExecutionEvent.EventType.TOOL_CALL_END) {
+            log.info("tool_event sessionId={} tool={} event={} status={} input={} output={}",
+                    memoryId,
+                    agentName,
+                    eventType,
+                    status,
+                    summarize(String.valueOf(input), 240),
+                    summarize(String.valueOf(output), 240));
+        }
     }
 
     private static Map<String, Object> llmResponseMetadata(int iteration,
@@ -978,10 +912,109 @@ public abstract class AbstractAgentExecutor<B extends AbstractAgentExecutor.Buil
         if (messages == null || messages.isEmpty()) {
             return "messages=0";
         }
-        return messages.stream()
-                .map(message -> message.role().name().toLowerCase(Locale.ROOT)
-                        + ":" + summarize(message.content(), 180))
-                .collect(Collectors.joining("\n"));
+        List<String> summary = new ArrayList<>(messages.size());
+        for (int i = 0; i < messages.size(); i++) {
+            summary.add(summarizeRequestMessage(i, messages.get(i)));
+        }
+        return String.join("\n", summary);
+    }
+
+    private static String summarizeRequestMessage(int index, AiChatMessage message) {
+        if (message == null) {
+            return "[" + index + "] null";
+        }
+        StringBuilder summary = new StringBuilder("[")
+                .append(index)
+                .append("] ")
+                .append(message.role().name().toLowerCase(Locale.ROOT));
+        if (message.name() != null && !message.name().isBlank()) {
+            summary.append("(name=").append(message.name()).append(")");
+        }
+        if (message.toolCallId() != null && !message.toolCallId().isBlank()) {
+            summary.append("(toolCallId=").append(message.toolCallId()).append(")");
+        }
+        if (message.toolCalls() != null && !message.toolCalls().isEmpty()) {
+            String ids = message.toolCalls().stream()
+                    .filter(Objects::nonNull)
+                    .map(toolCall -> toolCall.name() + "#" + toolCall.id())
+                    .collect(Collectors.joining(","));
+            summary.append("(toolCalls=").append(ids).append(")");
+        }
+        summary.append(":").append(summarize(message.content(), 180));
+        return summary.toString();
+    }
+
+    private static List<String> findToolCallProtocolViolations(List<AiChatMessage> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        List<String> violations = new ArrayList<>();
+        PendingToolResultBlock pendingBlock = null;
+        for (int i = 0; i < messages.size(); i++) {
+            AiChatMessage message = messages.get(i);
+            if (message == null) {
+                continue;
+            }
+            if (message.role() == AiChatMessage.Role.ASSISTANT
+                    && message.toolCalls() != null
+                    && !message.toolCalls().isEmpty()) {
+                if (pendingBlock != null && !pendingBlock.isClosed()) {
+                    violations.add("assistant tool-call block at index " + pendingBlock.assistantIndex()
+                            + " is incomplete before assistant tool-call block at index " + i
+                            + ": missing " + pendingBlock.pendingIds());
+                }
+                pendingBlock = PendingToolResultBlock.open(i, message.toolCalls());
+                continue;
+            }
+            if (message.role() == AiChatMessage.Role.TOOL) {
+                String toolCallId = message.toolCallId();
+                if (toolCallId == null || toolCallId.isBlank()) {
+                    violations.add("tool message at index " + i + " is missing toolCallId");
+                    continue;
+                }
+                if (pendingBlock == null) {
+                    violations.add("tool message at index " + i
+                            + " has no open assistant tool-call block: " + toolCallId);
+                    continue;
+                }
+                if (!pendingBlock.consume(toolCallId)) {
+                    violations.add("tool message at index " + i
+                            + " does not match current assistant tool-call block at index "
+                            + pendingBlock.assistantIndex() + ": " + toolCallId);
+                    continue;
+                }
+                continue;
+            }
+            if (pendingBlock != null && !pendingBlock.isClosed()) {
+                violations.add("assistant tool-call block at index " + pendingBlock.assistantIndex()
+                        + " is incomplete before " + message.role().name().toLowerCase(Locale.ROOT)
+                        + " message at index " + i + ": missing " + pendingBlock.pendingIds());
+            }
+        }
+        if (pendingBlock != null && !pendingBlock.isClosed()) {
+            violations.add("assistant tool-call block at index " + pendingBlock.assistantIndex()
+                    + " is incomplete at end of request: missing " + pendingBlock.pendingIds());
+        }
+        return violations;
+    }
+
+    private record PendingToolResultBlock(int assistantIndex, LinkedHashSet<String> pendingIds) {
+        private static PendingToolResultBlock open(int assistantIndex, List<AiToolCall> toolCalls) {
+            LinkedHashSet<String> ids = toolCalls.stream()
+                    .filter(Objects::nonNull)
+                    .map(AiToolCall::id)
+                    .filter(id -> id != null && !id.isBlank())
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+            return new PendingToolResultBlock(assistantIndex, ids);
+        }
+
+        private boolean consume(String toolCallId) {
+            return pendingIds.remove(toolCallId);
+        }
+
+        private boolean isClosed() {
+            return pendingIds.isEmpty();
+        }
     }
 
     private static String assistantMessageSummary(AiChatMessage message) {

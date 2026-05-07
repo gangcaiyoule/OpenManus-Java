@@ -246,6 +246,122 @@ class AgentCoordinatorSmokeTest implements SmokeTest {
             assertThat(mockMemory.getMessages())
                     .anyMatch(msg -> msg.role() == AiChatMessage.Role.SYSTEM);
         }
+
+        @Test
+        @DisplayName("should keep full memory history in model request")
+        void execute_withMemoryHistory_keepsFullHistory() {
+            mockMemory.add(AiChatMessage.system("system"));
+            mockMemory.add(AiChatMessage.user("older request"));
+            mockMemory.add(AiChatMessage.assistant("older answer"));
+            mockChatModel.addResponse(AiChatMessage.assistant("final answer"));
+            agent = buildAgent();
+
+            String result = agent.execute("current request", "test-session");
+
+            assertThat(result).contains("final answer");
+            assertThat(mockChatModel.getRequests()).hasSize(1);
+            assertThat(mockChatModel.getRequests().getFirst().messages())
+                    .extracting(AiChatMessage::content)
+                    .containsSequence("system", "older request", "older answer", "current request");
+        }
+    }
+
+    @Nested
+    @DisplayName("Protocol Validation")
+    class ProtocolValidationTests {
+
+        @Test
+        @DisplayName("should allow a closed single-tool result block")
+        void execute_withClosedSingleToolResultBlock_allowsProviderRequest() {
+            mockMemory.add(assistantToolCalls("call-1"));
+            mockMemory.add(toolResult("call-1"));
+            mockChatModel.addResponse(AiChatMessage.assistant("final answer"));
+            agent = buildAgent();
+
+            String result = agent.execute("current request", "test-session");
+
+            assertThat(result).contains("final answer");
+            assertThat(mockChatModel.getCallCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("should allow a closed multi-tool result block")
+        void execute_withClosedMultiToolResultBlock_allowsProviderRequest() {
+            mockMemory.add(assistantToolCalls("call-a", "call-b"));
+            mockMemory.add(toolResult("call-a"));
+            mockMemory.add(toolResult("call-b"));
+            mockChatModel.addResponse(AiChatMessage.assistant("final answer"));
+            agent = buildAgent();
+
+            String result = agent.execute("current request", "test-session");
+
+            assertThat(result).contains("final answer");
+            assertThat(mockChatModel.getCallCount()).isEqualTo(1);
+        }
+
+        @Test
+        @DisplayName("should fail fast when tool message is missing toolCallId")
+        void execute_withToolMessageMissingToolCallId_failsFast() {
+            mockMemory.add(new AiChatMessage(
+                    AiChatMessage.Role.TOOL,
+                    "tool output",
+                    "fileTool",
+                    null,
+                    List.of()
+            ));
+            agent = buildAgent();
+
+            assertThatThrownBy(() -> agent.execute("current request", "test-session"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("missing toolCallId");
+            assertThat(mockChatModel.getCallCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("should fail fast when tool message is orphaned")
+        void execute_withOrphanToolMessage_failsFast() {
+            mockMemory.add(AiChatMessage.assistant("older answer"));
+            mockMemory.add(new AiChatMessage(
+                    AiChatMessage.Role.TOOL,
+                    "tool output",
+                    "fileTool",
+                    "call-1",
+                    List.of()
+            ));
+            agent = buildAgent();
+
+            assertThatThrownBy(() -> agent.execute("current request", "test-session"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("has no open assistant tool-call block");
+            assertThat(mockChatModel.getCallCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("should fail fast when multi-tool result block is incomplete")
+        void execute_withIncompleteMultiToolResultBlock_failsFast() {
+            mockMemory.add(assistantToolCalls("call-a", "call-b"));
+            mockMemory.add(toolResult("call-a"));
+            agent = buildAgent();
+
+            assertThatThrownBy(() -> agent.execute("current request", "test-session"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("tool-call block at index")
+                    .hasMessageContaining("is incomplete");
+            assertThat(mockChatModel.getCallCount()).isZero();
+        }
+
+        @Test
+        @DisplayName("should fail fast when toolCallId does not match current assistant block")
+        void execute_withToolMessageOutsideCurrentAssistantBlock_failsFast() {
+            mockMemory.add(assistantToolCalls("call-a"));
+            mockMemory.add(toolResult("call-b"));
+            agent = buildAgent();
+
+            assertThatThrownBy(() -> agent.execute("current request", "test-session"))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("does not match current assistant tool-call block");
+            assertThat(mockChatModel.getCallCount()).isZero();
+        }
     }
 
     @Nested
@@ -402,6 +518,24 @@ class AgentCoordinatorSmokeTest implements SmokeTest {
                 .aiMemoryProvider(sessionId -> mockMemory)
                 .maxIterations(3)
                 .build();
+    }
+
+    private static AiChatMessage assistantToolCalls(String... ids) {
+        List<AiToolCall> toolCalls = new ArrayList<>();
+        for (String id : ids) {
+            toolCalls.add(new AiToolCall(id, "mockTool" + id, "{}"));
+        }
+        return AiChatMessage.assistant("calling tools", toolCalls);
+    }
+
+    private static AiChatMessage toolResult(String toolCallId) {
+        return new AiChatMessage(
+                AiChatMessage.Role.TOOL,
+                "tool output for " + toolCallId,
+                "mockTool",
+                toolCallId,
+                List.of()
+        );
     }
 
     // Mock implementations

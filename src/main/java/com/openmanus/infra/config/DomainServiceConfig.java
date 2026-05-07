@@ -5,6 +5,8 @@ import com.openmanus.domain.service.AgentExecutionPort;
 import com.openmanus.domain.service.ExecutionStreamingApplicationService;
 import com.openmanus.domain.service.ExecutionEventPort;
 import com.openmanus.domain.service.ExecutionStreamPublisher;
+import com.openmanus.domain.service.InMemorySessionExecutionGuard;
+import com.openmanus.domain.service.SessionExecutionGuard;
 import com.openmanus.domain.service.WebProxyFetchPort;
 import com.openmanus.domain.service.WebProxyService;
 import com.openmanus.sandbox.application.SandboxSessionApplicationService;
@@ -21,21 +23,29 @@ public class DomainServiceConfig {
 
     @Bean
     ConversationApplicationService conversationApplicationService(AgentExecutionPort agentExecutionPort,
-                                                                  ExecutionEventPort executionEventPort) {
-        return new ConversationApplicationService(agentExecutionPort, executionEventPort);
+                                                                  ExecutionEventPort executionEventPort,
+                                                                  SessionExecutionGuard sessionExecutionGuard) {
+        return new ConversationApplicationService(agentExecutionPort, executionEventPort, sessionExecutionGuard);
     }
 
     @Bean
     ExecutionStreamingApplicationService executionStreamingApplicationService(AgentExecutionPort agentExecutionPort,
                                                                              ExecutionEventPort executionEventPort,
                                                                              ExecutionStreamPublisher streamPublisher,
-                                                                             @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor) {
+                                                                             @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor,
+                                                                             SessionExecutionGuard sessionExecutionGuard) {
         return new ExecutionStreamingApplicationService(
                 agentExecutionPort,
                 executionEventPort,
                 streamPublisher,
-                asyncExecutor
+                asyncExecutor,
+                sessionExecutionGuard
         );
+    }
+
+    @Bean
+    SessionExecutionGuard sessionExecutionGuard() {
+        return new InMemorySessionExecutionGuard();
     }
 
     @Bean

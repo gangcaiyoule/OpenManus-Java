@@ -44,9 +44,6 @@ test -x scripts/validate-single-agent.sh -a -x scripts/mvnw-local.sh
 Expected:
 - compile succeeds
 - all tests pass
-- guard tests include `ValidationScriptsConsistencyTest` to prevent validation-script drift.
-- guard tests include `MvnwLocalScriptIntegrationTest` to validate `mvnw-local.sh` runtime behavior.
-- regression tests include `UnifiedWorkflowTest` to lock blank-input rejection and memory-id forwarding at unified workflow entry.
 - pre-release gate retries tests once only for transient surefire bootstrap error (`Unable to access jarfile .../surefirebooter-*.jar`), clears `target/surefire` before retry, and preserves `target/surefire-reports`.
 - if retry still fails, use preserved `target/surefire-reports` from the first attempt for diagnostics.
 - retry logs include stable CI tags for signature match, cleanup, retry start, and completion: `VALIDATE_RETRY_SIGNATURE_MATCHED`, `VALIDATE_RETRY_CLEANUP`, `VALIDATE_RETRY_STARTED`, `VALIDATE_RETRY_COMPLETED`.

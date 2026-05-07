@@ -1,6 +1,7 @@
 package com.openmanus.infra.web;
 
 import com.openmanus.domain.model.ExecutionErrorCodes;
+import com.openmanus.domain.model.ExecutionResponse;
 import com.openmanus.domain.service.ConversationApplicationService;
 import com.openmanus.domain.service.ExecutionStreamingApplicationService;
 import com.openmanus.sandbox.application.SandboxSessionApplicationService;
@@ -79,5 +80,27 @@ class AgentControllerSessionSandboxStartTest {
         assertThat(response.getBody()).containsEntry("sessionId", sessionId);
         assertThat(String.valueOf(response.getBody().get("error"))).contains("沙箱启动失败");
         assertThat(response.getBody()).containsEntry("errorCode", ExecutionErrorCodes.INTERNAL_ERROR);
+    }
+
+    @Test
+    @DisplayName("executionStream should map session busy to conflict")
+    void executionStream_mapsSessionBusyToConflict() {
+        when(executionStreamingApplicationService.executeAndStreamEvents("hello", "session-123"))
+                .thenReturn(ExecutionResponse.builder()
+                        .success(false)
+                        .sessionId("session-123")
+                        .error("当前会话正在执行中，请稍后重试")
+                        .errorCode(ExecutionErrorCodes.SESSION_BUSY)
+                        .build());
+
+        var request = new com.openmanus.domain.model.ExecutionRequest();
+        request.setInput("hello");
+        request.setSessionId("session-123");
+
+        ResponseEntity<ExecutionStreamResponse> response = controller.executionStream(request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getErrorCode()).isEqualTo(ExecutionErrorCodes.SESSION_BUSY);
     }
 }

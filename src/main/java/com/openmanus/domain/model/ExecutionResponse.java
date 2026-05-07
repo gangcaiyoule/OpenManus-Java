@@ -21,6 +21,11 @@ public class ExecutionResponse {
      * 会话ID
      */
     private String sessionId;
+
+    /**
+     * 单次执行ID
+     */
+    private String executionId;
     
     /**
      * 错误信息，如果有的话

@@ -86,23 +86,6 @@ openmanus:
     # 读取到损坏 JSON 时是否先隔离到 corrupted/ 目录
     # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_QUARANTINE_CORRUPTED_FILES 覆盖
     quarantine-corrupted-files: true
-    # 每轮发送给模型的历史消息上限，0 表示不限制（默认）
-    # 配置为负值会自动回退为 0（不限制）
-    # 仅影响模型输入窗口，不影响 ChatMemory 持久化全量历史
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_MESSAGES 覆盖
-    model-context-max-messages: 0
-    # 每轮发送给模型的总消息上限（历史 + 当前轮），0 表示不限制（默认）
-    # 配置为负值会自动回退为 0（不限制）
-    # 用于约束一次 execute 内多轮工具调用导致的输入膨胀
-    # 当配置为 1 时，仅保证保留当前轮关键消息（优先当前用户问题）
-    # 当存在工具多轮调用时，建议 >=3（可同时容纳当前 user + tool result + 关键上下文）
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_TOTAL_MESSAGES 覆盖
-    model-context-max-total-messages: 0
-    # 每轮模型输入的近似 token 预算（基于字符估算），默认 128000
-    # 如需关闭该预算限制可显式设置为 0
-    # 与 message 条数窗口协同生效，优先保留当前 user / system / 最新 tool result
-    # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_MODEL_CONTEXT_MAX_APPROX_TOKENS 覆盖
-    model-context-max-approx-tokens: 128000
     # 单次 execute 的 ReAct 最大轮数，0 表示不按轮数截断（只要持续产出工具调用就继续）
     # 建议结合 react-max-execution-seconds 一起使用
     # 也可通过环境变量 OPENMANUS_CHAT_MEMORY_REACT_MAX_ITERATIONS 覆盖

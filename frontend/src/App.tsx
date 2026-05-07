@@ -1,10 +1,19 @@
 import { FormEvent, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { marked } from 'marked';
-import { ApiError, getSessionInfo, startWorkflow } from './api/agentApi';
+import {
+  ApiError,
+  getSessionInfo,
+  inspectProxyPreview,
+  startSessionSandbox,
+  startWorkflow
+} from './api/agentApi';
+import type { ThoughtStep } from './types/api';
 import {
   initialWorkflowState,
   workflowReducer,
+  type BrowserStatus,
   type ChatMessage,
+  type TimelineEntry,
   type ToolOutput
 } from './store/workflowStore';
 import { WorkflowSocketClient } from './ws/workflowSocketClient';
@@ -14,30 +23,59 @@ marked.setOptions({ breaks: true, gfm: true });
 export default function App(): JSX.Element {
   const [state, dispatch] = useReducer(workflowReducer, initialWorkflowState);
   const [input, setInput] = useState('');
-  const [browserMode, setBrowserMode] = useState<'web' | 'vnc'>('web');
+  const [browserMode, setBrowserMode] = useState<'web' | 'snapshot' | 'vnc'>('web');
   const [useProxy, setUseProxy] = useState(true);
   const [showToolPanel, setShowToolPanel] = useState(true);
-  const [activeToolTab, setActiveToolTab] = useState<'search' | 'output'>('search');
+  const [activeToolTab, setActiveToolTab] = useState<'search' | 'status' | 'output'>('search');
+  const [iframeBlockedReason, setIframeBlockedReason] = useState<string | null>(null);
   const socketRef = useRef<WorkflowSocketClient | null>(null);
 
   const statusText = useMemo(() => {
     switch (state.connectionStatus) {
       case 'connecting':
-        return '连接中';
+        return 'Connecting';
       case 'connected':
-        return '已连接';
+        return 'Connected';
       case 'error':
-        return '连接异常';
+        return 'Connection Error';
       default:
-        return '待命';
+        return 'Idle';
     }
   }, [state.connectionStatus]);
+
+  const connectionTone = state.connectionStatus;
 
   useEffect(() => {
     return () => {
       void disconnectSocket();
     };
   }, []);
+
+  useEffect(() => {
+    if ((state.browserStatus === 'auto-switch-vnc' || state.previewMode === 'vnc') && state.sandboxVncUrl) {
+      setBrowserMode('vnc');
+    }
+  }, [state.browserStatus, state.previewMode, state.sandboxVncUrl]);
+
+  useEffect(() => {
+    if (state.snapshotPreview && (state.browserStatus === 'proxy-rendered' || state.previewBlockedReason)) {
+      setBrowserMode('snapshot');
+    }
+  }, [state.browserStatus, state.previewBlockedReason, state.snapshotPreview]);
+
+  useEffect(() => {
+    if (state.currentUrl.length === 0 || useProxy === false) {
+      return;
+    }
+    if (state.previewMode === 'vnc' && state.sandboxVncUrl) {
+      return;
+    }
+    let cancelled = false;
+    void inspectCurrentUrl(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [state.currentUrl, useProxy, state.sandboxVncUrl]);
 
   async function sendMessage(event?: FormEvent): Promise<void> {
     if (event) {
@@ -56,32 +94,44 @@ export default function App(): JSX.Element {
       await disconnectSocket();
       dispatch({ type: 'SET_STATUS', payload: 'connecting' });
 
-      const startData = await startWorkflow({ input: content });
-      const sessionId = startData.sessionId || '';
+      socketRef.current = new WorkflowSocketClient();
+      await socketRef.current.connect();
+
+      const startData = await startWorkflow({
+        input: content,
+        sessionId: state.sessionId || undefined
+      });
+      const sessionId = startData.session_id || startData.sessionId || '';
       const topic = startData.topic || '';
       if (sessionId.length === 0 || topic.length === 0) {
-        throw new ApiError('后端未返回可订阅主题');
+        throw new ApiError('Backend did not return a subscribable topic');
       }
 
       dispatch({ type: 'SET_STREAM', payload: { sessionId, topic } });
-      socketRef.current = new WorkflowSocketClient();
-      await socketRef.current.connect();
       dispatch({ type: 'SET_STATUS', payload: 'connected' });
+      void bootstrapSandbox(sessionId);
 
       socketRef.current.subscribe(topic, {
-        onLog: (payload) => dispatch({ type: 'APPEND_LOG', payload }),
-        onEvent: (payload) => {
-          dispatch({ type: 'HANDLE_EVENT', payload });
-          if (payload.eventType === 'ERROR') {
-            dispatch({ type: 'SET_LOADING', payload: false });
-            dispatch({ type: 'SET_STATUS', payload: 'error' });
-            void disconnectSocket();
+        onLog: (payload) => {
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (sessionId.length > 0 && payloadSessionId && payloadSessionId !== sessionId) {
+            return;
           }
+          dispatch({ type: 'APPEND_LOG', payload });
+        },
+        onEvent: (payload) => {
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (sessionId.length > 0 && payloadSessionId && payloadSessionId !== sessionId) {
+            return;
+          }
+          dispatch({ type: 'HANDLE_EVENT', payload });
         },
         onResult: async (payload) => {
-          dispatch({ type: 'HANDLE_RESULT', payload });
-          await pollSandbox(sessionId);
-          await disconnectSocket();
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (sessionId.length > 0 && payloadSessionId && payloadSessionId !== sessionId) {
+            return;
+          }
+          await completeExecutionWithResult(sessionId, payload.result || '已完成');
         },
         onSocketError: (message) => {
           dispatch({ type: 'SET_ERROR', payload: message });
@@ -90,9 +140,14 @@ export default function App(): JSX.Element {
         }
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '发送失败';
+      const message =
+        error instanceof ApiError && error.code === 'SESSION_BUSY'
+          ? '当前会话仍在处理中，请稍后再试'
+          : error instanceof Error
+            ? error.message
+            : 'Send failed';
+      dispatch({ type: 'ROLLBACK_PENDING_ASSISTANT' });
       dispatch({ type: 'SET_ERROR', payload: message });
-      dispatch({ type: 'SET_LOADING', payload: false });
       dispatch({ type: 'SET_STATUS', payload: 'error' });
       await disconnectSocket();
     }
@@ -113,6 +168,68 @@ export default function App(): JSX.Element {
     }
   }
 
+  async function bootstrapSandbox(sessionId: string): Promise<void> {
+    try {
+      const sessionData = await startSessionSandbox(sessionId);
+      if (sessionData.sandboxAvailable && sessionData.sandboxVncUrl) {
+        dispatch({ type: 'SET_VNC_URL', payload: sessionData.sandboxVncUrl });
+        return;
+      }
+    } catch {
+      // Ignore bootstrap failure and fall back to polling.
+    }
+    await pollSandbox(sessionId);
+  }
+
+  async function inspectCurrentUrl(isCancelled: () => boolean): Promise<void> {
+    try {
+      const diagnostic = await inspectProxyPreview(state.currentUrl);
+      if (isCancelled()) {
+        return;
+      }
+      if (diagnostic.previewableHtml) {
+        setIframeBlockedReason(null);
+        return;
+      }
+      dispatch({
+        type: 'HANDLE_EVENT',
+        payload: {
+          eventType: 'WEB_PREVIEW_BLOCKED',
+          metadata: {
+            activeUrl: diagnostic.targetUrl,
+            previewMode: diagnostic.previewMode,
+            blockReason: diagnostic.reasonCode || diagnostic.state,
+            detail: diagnostic.reason,
+            autoSwitchedToVnc: diagnostic.fallbackToVnc
+          }
+        }
+      });
+      setIframeBlockedReason(diagnostic.reason || diagnostic.reasonCode || '正在切换真实浏览器');
+      if (state.snapshotPreview) {
+        setBrowserMode('snapshot');
+      } else if (diagnostic.fallbackToVnc && state.sandboxVncUrl) {
+        setBrowserMode('vnc');
+      }
+    } catch (error) {
+      if (isCancelled()) {
+        return;
+      }
+      setIframeBlockedReason(error instanceof Error ? error.message : '网页预览诊断失败');
+    }
+  }
+
+  async function completeExecutionWithResult(sessionId: string, result: string): Promise<void> {
+    dispatch({
+      type: 'HANDLE_RESULT',
+      payload: {
+        sessionId,
+        result
+      }
+    });
+    await pollSandbox(sessionId);
+    await disconnectSocket();
+  }
+
   async function disconnectSocket(): Promise<void> {
     if (socketRef.current !== null) {
       await socketRef.current.disconnect();
@@ -122,7 +239,7 @@ export default function App(): JSX.Element {
 
   async function reconnect(): Promise<void> {
     if (state.topic === null || state.topic.length === 0) {
-      dispatch({ type: 'SET_ERROR', payload: '没有可重连的会话' });
+      dispatch({ type: 'SET_ERROR', payload: 'No reconnectable session found' });
       return;
     }
     try {
@@ -132,21 +249,28 @@ export default function App(): JSX.Element {
       await socketRef.current.connect();
       dispatch({ type: 'SET_STATUS', payload: 'connected' });
       socketRef.current.subscribe(state.topic, {
-        onLog: (payload) => dispatch({ type: 'APPEND_LOG', payload }),
-        onEvent: (payload) => {
-          dispatch({ type: 'HANDLE_EVENT', payload });
-          if (payload.eventType === 'ERROR') {
-            dispatch({ type: 'SET_LOADING', payload: false });
-            dispatch({ type: 'SET_STATUS', payload: 'error' });
-            void disconnectSocket();
+        onLog: (payload) => {
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (state.sessionId && payloadSessionId && payloadSessionId !== state.sessionId) {
+            return;
           }
+          dispatch({ type: 'APPEND_LOG', payload });
+        },
+        onEvent: (payload) => {
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (state.sessionId && payloadSessionId && payloadSessionId !== state.sessionId) {
+            return;
+          }
+          dispatch({ type: 'HANDLE_EVENT', payload });
         },
         onResult: async (payload) => {
-          dispatch({ type: 'HANDLE_RESULT', payload });
-          if (state.sessionId !== null) {
-            await pollSandbox(state.sessionId);
+          const payloadSessionId = payload.sessionId || payload.session_id;
+          if (state.sessionId && payloadSessionId && payloadSessionId !== state.sessionId) {
+            return;
           }
-          await disconnectSocket();
+          if (state.sessionId !== null) {
+            await completeExecutionWithResult(state.sessionId, payload.result || '已完成');
+          }
         },
         onSocketError: (message) => {
           dispatch({ type: 'SET_ERROR', payload: message });
@@ -156,18 +280,23 @@ export default function App(): JSX.Element {
       });
     } catch (error) {
       dispatch({ type: 'SET_STATUS', payload: 'error' });
-      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : '重连失败' });
+      dispatch({ type: 'SET_ERROR', payload: error instanceof Error ? error.message : 'Reconnection failed' });
     }
   }
 
-  async function cancelStreaming(): Promise<void> {
+  async function stopWatchingStream(): Promise<void> {
     await disconnectSocket();
     dispatch({ type: 'SET_LOADING', payload: false });
     dispatch({ type: 'SET_STATUS', payload: 'idle' });
+    dispatch({
+      type: 'SET_ERROR',
+      payload: '已停止实时订阅。后台任务可能仍在执行，完成前同一会话的新请求可能返回忙碌。'
+    });
   }
 
   function resetConversation(): void {
     dispatch({ type: 'RESET' });
+    setIframeBlockedReason(null);
     void disconnectSocket();
   }
 
@@ -178,28 +307,40 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <header className="top-nav">
-        <div className="brand">OpenManus Frontend</div>
+        <div className="brand-block">
+          <div className="brand">OpenManus</div>
+          <div className="brand-meta">Agent workspace</div>
+        </div>
         <div className="nav-actions">
-          <span className="status-tag">{statusText}</span>
+          <span className={'status-tag status-' + connectionTone}>
+            <span className="status-light" aria-hidden="true" />
+            {statusText}
+          </span>
           <button className="btn secondary" onClick={() => void reconnect()}>
-            重连
+            Reconnect
           </button>
-          <button className="btn secondary" onClick={() => void cancelStreaming()} disabled={state.loading === false}>
-            取消接收
+          <button className="btn secondary" onClick={() => void stopWatchingStream()} disabled={state.loading === false}>
+            Stop Watching
           </button>
           <button className="btn" onClick={resetConversation}>
-            新对话
+            New Chat
           </button>
         </div>
       </header>
 
       <main className="workspace">
         <section className="panel chat-panel">
-          <div className="panel-title">对话</div>
+          <div className="panel-title">
+            <span>Conversation</span>
+          </div>
           <div className="messages">
-            {state.messages.length === 0 ? <div className="empty">输入问题开始对话</div> : null}
+            {state.messages.length === 0 ? <div className="empty">Type a prompt to start the conversation</div> : null}
             {state.messages.map((message) => (
-              <MessageCard key={message.id} message={message} />
+              <MessageCard
+                key={message.id}
+                message={message}
+                isStreaming={state.loading && isLatestAssistantMessage(state.messages, message.id)}
+              />
             ))}
             {state.error ? <div className="error-banner">{state.error}</div> : null}
           </div>
@@ -214,7 +355,7 @@ export default function App(): JSX.Element {
                   void sendMessage();
                 }
               }}
-              placeholder="输入消息，Ctrl/⌘+Enter 发送"
+              placeholder="Type a message, Ctrl/⌘+Enter to send"
             />
             <div className="input-actions">
               <button
@@ -223,10 +364,10 @@ export default function App(): JSX.Element {
                 onClick={() => setInput('')}
                 disabled={state.loading}
               >
-                清空
+                Clear
               </button>
               <button className="btn" type="submit" disabled={state.loading}>
-                {state.loading ? '处理中...' : '发送'}
+                {state.loading ? 'Processing...' : 'Send'}
               </button>
             </div>
           </form>
@@ -234,9 +375,9 @@ export default function App(): JSX.Element {
 
         <section className={'panel tool-panel ' + (showToolPanel ? '' : 'collapsed')}>
           <div className="panel-title with-action">
-            <span>工具</span>
+            <span>Tools</span>
             <button className="btn tiny secondary" onClick={() => setShowToolPanel(!showToolPanel)}>
-              {showToolPanel ? '隐藏' : '显示'}
+              {showToolPanel ? 'Hide' : 'Show'}
             </button>
           </div>
           <div className="tool-tabs">
@@ -244,18 +385,26 @@ export default function App(): JSX.Element {
               className={activeToolTab === 'search' ? 'active' : ''}
               onClick={() => setActiveToolTab('search')}
             >
-              搜索结果
+              Search Trail
+            </button>
+            <button
+              className={activeToolTab === 'status' ? 'active' : ''}
+              onClick={() => setActiveToolTab('status')}
+            >
+              Web Status
             </button>
             <button
               className={activeToolTab === 'output' ? 'active' : ''}
               onClick={() => setActiveToolTab('output')}
             >
-              工具输出
+              Tool Output
             </button>
           </div>
           <div className="tool-body">
-            {activeToolTab === 'search'
-              ? state.searchResults.map((item) => (
+            {activeToolTab === 'search' ? (
+              <>
+                <TimelineSection title="Search Timeline" items={state.searchTimeline} />
+                {state.searchResults.map((item) => (
                   <article key={item.url} className="card">
                     <h4>{item.title}</h4>
                     <a href={item.url} target="_blank" rel="noreferrer">
@@ -263,25 +412,49 @@ export default function App(): JSX.Element {
                     </a>
                     <p>{item.snippet}</p>
                   </article>
-                ))
-              : state.toolOutputs.map((output) => <OutputCard key={output.id} output={output} />)}
+                ))}
+              </>
+            ) : null}
+            {activeToolTab === 'status' ? (
+              <>
+                <article className="card">
+                  <h4>Browser State</h4>
+                  <p className="muted">Status: {statusLabel(state.browserStatus, state.previewMode)}</p>
+                  <p className="muted">Preview: {state.previewMode}</p>
+                  {state.previewBlockedReason || iframeBlockedReason ? (
+                    <p>{state.previewBlockedReason || iframeBlockedReason}</p>
+                  ) : null}
+                  {state.snapshotPath ? <p className="muted">Snapshot: {state.snapshotPath}</p> : null}
+                  {state.snapshotPreview ? <pre>{state.snapshotPreview}</pre> : null}
+                </article>
+                <TimelineSection title="Web Timeline" items={state.webTimeline} />
+              </>
+            ) : null}
+            {activeToolTab === 'output'
+              ? state.toolOutputs.map((output) => <OutputCard key={output.id} output={output} />)
+              : null}
             {activeToolTab === 'search' && state.searchResults.length === 0 ? (
-              <div className="empty">暂无搜索结果</div>
+              <div className="empty">No search events yet</div>
+            ) : null}
+            {activeToolTab === 'status' && state.webTimeline.length === 0 ? (
+              <div className="empty">No web status yet</div>
             ) : null}
             {activeToolTab === 'output' && state.toolOutputs.length === 0 ? (
-              <div className="empty">暂无工具输出</div>
+              <div className="empty">No tool output yet</div>
             ) : null}
           </div>
         </section>
 
         <section className="panel browser-panel">
-          <div className="panel-title">浏览器 / 沙箱</div>
+          <div className="panel-title">
+            <span>Browser / Sandbox</span>
+          </div>
           <div className="browser-toolbar">
             <input
               value={state.currentUrl}
               onChange={(event) => onUrlChange(event.target.value)}
               onBlur={() => onUrlChange(normalizeUrl(state.currentUrl))}
-              placeholder="输入网址"
+              placeholder="Enter URL"
             />
             <label className="toggle">
               <input
@@ -289,10 +462,17 @@ export default function App(): JSX.Element {
                 checked={useProxy}
                 onChange={(event) => setUseProxy(event.target.checked)}
               />
-              代理
+              Proxy
             </label>
             <button className={browserMode === 'web' ? 'active' : ''} onClick={() => setBrowserMode('web')}>
-              网页
+              Web
+            </button>
+            <button
+              className={browserMode === 'snapshot' ? 'active' : ''}
+              onClick={() => setBrowserMode('snapshot')}
+              disabled={!state.snapshotPreview}
+            >
+              Snapshot
             </button>
             <button
               className={browserMode === 'vnc' ? 'active' : ''}
@@ -301,18 +481,74 @@ export default function App(): JSX.Element {
             >
               VNC
             </button>
+            {state.currentUrl ? (
+              <a className="btn tiny secondary" href={state.currentUrl} target="_blank" rel="noreferrer">
+                Open External
+              </a>
+            ) : null}
+          </div>
+          <div className="panel-title with-action">
+            <span className={'browser-status status-' + browserStatusTone(state.browserStatus)}>
+              <span className="status-light" aria-hidden="true" />
+              {statusLabel(state.browserStatus, state.previewMode)}
+            </span>
+            <span>
+              {state.previewMode === 'vnc' && state.sandboxVncUrl
+                ? '真实浏览器正在展示该网页'
+                : state.currentUrl || iframeBlockedReason || '等待网页事件'}
+            </span>
           </div>
           <div className="browser-frame">
             {browserMode === 'web' ? (
               state.currentUrl.length > 0 ? (
-                <iframe src={proxyUrl(state.currentUrl, useProxy)} title="web-preview" />
+                <iframe
+                  src={proxyUrl(state.currentUrl, useProxy)}
+                  title="web-preview"
+                  onLoad={() => {
+                    if (state.previewBlockedReason === null) {
+                      setIframeBlockedReason(null);
+                    }
+                  }}
+                  onError={() => {
+                    const reason = '当前站点可能拒绝 iframe 嵌入，或代理后的子资源加载失败';
+                    setIframeBlockedReason(reason);
+                    dispatch({
+                      type: 'HANDLE_EVENT',
+                      payload: {
+                        eventType: 'WEB_PREVIEW_BLOCKED',
+                        metadata: {
+                          activeUrl: state.currentUrl,
+                          previewMode: state.sandboxVncUrl ? 'vnc' : 'external',
+                          blockReason: 'iframe-blocked',
+                          detail: reason,
+                          autoSwitchedToVnc: state.sandboxVncUrl !== null
+                        }
+                      }
+                    });
+                    if (state.snapshotPreview) {
+                      setBrowserMode('snapshot');
+                    } else if (state.sandboxVncUrl) {
+                      setBrowserMode('vnc');
+                    }
+                  }}
+                />
               ) : (
-                <div className="empty">输入网址开始浏览</div>
+                <div className="empty">Enter a URL to start browsing</div>
+              )
+            ) : browserMode === 'snapshot' ? (
+              state.snapshotPreview ? (
+                <iframe
+                  srcDoc={buildSnapshotDocument(state.snapshotPreview, state.currentUrl)}
+                  title="snapshot-preview"
+                  sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin"
+                />
+              ) : (
+                <div className="empty">No page snapshot yet</div>
               )
             ) : state.sandboxVncUrl ? (
               <iframe src={state.sandboxVncUrl} title="vnc-preview" />
             ) : (
-              <div className="empty">VNC 尚未就绪</div>
+              <div className="empty">正在启动真实浏览器工作区...</div>
             )}
           </div>
         </section>
@@ -321,20 +557,60 @@ export default function App(): JSX.Element {
   );
 }
 
-function MessageCard({ message }: { message: ChatMessage }): JSX.Element {
+function TimelineSection({ title, items }: { title: string; items: TimelineEntry[] }): JSX.Element {
+  return (
+    <>
+      <article className="card">
+        <h4>{title}</h4>
+        <p className="muted">{items.length > 0 ? `Latest ${items.length} events` : 'Waiting for events'}</p>
+      </article>
+      {items.map((item) => (
+        <article key={item.id} className="card">
+          <h4>{item.title}</h4>
+          <p className="muted">{item.time}</p>
+          <p>{item.description}</p>
+          {item.url ? (
+            <a href={item.url} target="_blank" rel="noreferrer">
+              {item.url}
+            </a>
+          ) : null}
+        </article>
+      ))}
+    </>
+  );
+}
+
+function MessageCard({ message, isStreaming }: { message: ChatMessage; isStreaming: boolean }): JSX.Element {
   return (
     <article className={'message-card ' + message.role}>
       <header>
-        <strong>{message.role === 'user' ? '你' : 'AI'}</strong>
+        <strong>{message.role === 'user' ? 'User' : 'AI'}</strong>
         <span>{message.time}</span>
       </header>
       <div
         className="markdown"
         dangerouslySetInnerHTML={{ __html: marked.parse(message.content || '') as string }}
       />
+      {message.role === 'assistant' ? (
+        <section className="thought-panel">
+          <div className="thought-panel-header">
+            <strong>Execution Trace</strong>
+            {isStreaming ? <span className="thought-status">Streaming</span> : null}
+          </div>
+          {message.thoughtSteps.length > 0 ? (
+            <div className="thought-steps">
+              {message.thoughtSteps.map((step) => (
+                <ThoughtStepCard key={step.id} step={step} />
+              ))}
+            </div>
+          ) : isStreaming ? (
+            <div className="thought-placeholder">Waiting for backend events...</div>
+          ) : null}
+        </section>
+      ) : null}
       {message.logs.length > 0 ? (
         <details>
-          <summary>思考过程 ({message.logs.length})</summary>
+          <summary>Reasoning trace ({message.logs.length})</summary>
           <div className="logs">
             {message.logs.map((log, index) => (
               <div key={String(index) + '-' + (log.timestamp || '')} className="log-line">
@@ -345,6 +621,18 @@ function MessageCard({ message }: { message: ChatMessage }): JSX.Element {
           </div>
         </details>
       ) : null}
+    </article>
+  );
+}
+
+function ThoughtStepCard({ step }: { step: ThoughtStep }): JSX.Element {
+  return (
+    <article className={'thought-step ' + step.kind}>
+      <header>
+        <strong>{step.title}</strong>
+        <span>{step.time}</span>
+      </header>
+      {step.content ? <pre>{step.content}</pre> : <p className="muted">No details yet</p>}
     </article>
   );
 }
@@ -363,7 +651,7 @@ function proxyUrl(url: string, useProxy: boolean): string {
   if (useProxy === false || url.length === 0) {
     return url;
   }
-  const encoded = btoa(encodeURIComponent(url)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const encoded = btoa(unescape(encodeURIComponent(url))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   return '/api/proxy/web?url=' + encoded;
 }
 
@@ -378,8 +666,107 @@ function normalizeUrl(url: string): string {
   return 'https://' + value;
 }
 
+function buildSnapshotDocument(snapshot: string, currentUrl: string): string {
+  const trimmed = snapshot.trim();
+  if (/<html[\s>]/i.test(trimmed) || /<!doctype html/i.test(trimmed)) {
+    return injectSnapshotBase(trimmed, currentUrl);
+  }
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <base href="${escapeHtml(currentUrl)}">
+  <style>
+    body { margin: 0; padding: 18px; font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #111827; background: #fff; }
+    pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+  </style>
+</head>
+<body><pre>${escapeHtml(snapshot)}</pre></body>
+</html>`;
+}
+
+function injectSnapshotBase(documentHtml: string, currentUrl: string): string {
+  if (currentUrl.length === 0 || /<base[\s>]/i.test(documentHtml)) {
+    return documentHtml;
+  }
+  const baseTag = `<base href="${escapeHtml(currentUrl)}">`;
+  const headMatch = /<head[^>]*>/i.exec(documentHtml);
+  if (headMatch?.index !== undefined) {
+    const insertAt = headMatch.index + headMatch[0].length;
+    return documentHtml.slice(0, insertAt) + baseTag + documentHtml.slice(insertAt);
+  }
+  const htmlMatch = /<html[^>]*>/i.exec(documentHtml);
+  if (htmlMatch?.index !== undefined) {
+    const insertAt = htmlMatch.index + htmlMatch[0].length;
+    return documentHtml.slice(0, insertAt) + `<head>${baseTag}</head>` + documentHtml.slice(insertAt);
+  }
+  return `<!doctype html><html><head>${baseTag}</head><body>${documentHtml}</body></html>`;
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function nowTime(): string {
-  return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  return new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function isLatestAssistantMessage(messages: ChatMessage[], messageId: string): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === 'assistant') {
+      return messages[i].id === messageId;
+    }
+  }
+  return false;
+}
+
+function statusLabel(status: BrowserStatus, previewMode: string): string {
+  const labels: Record<BrowserStatus, string> = {
+    idle: 'Idle',
+    searching: 'Searching',
+    'opening-search-page': 'Opening Search Page',
+    'results-ready': 'Results Ready',
+    'opening-target-page': 'Opening Target Page',
+    'proxy-rendered': 'Proxy Rendered',
+    'proxy-blocked': 'Proxy Blocked',
+    'auto-switch-vnc': 'Auto Switch VNC',
+    loading: 'Loading',
+    proxying: 'Proxying',
+    rendered: 'Rendered',
+    blocked: 'Blocked',
+    'fallback-to-vnc': 'Fallback to VNC',
+    'open-external': 'Open External'
+  };
+  return `${labels[status]} · ${previewMode}`;
+}
+
+function browserStatusTone(status: BrowserStatus): 'idle' | 'connecting' | 'connected' | 'error' {
+  if (status === 'idle') {
+    return 'idle';
+  }
+  if (
+    status === 'blocked' ||
+    status === 'proxy-blocked' ||
+    status === 'fallback-to-vnc' ||
+    status === 'open-external'
+  ) {
+    return 'error';
+  }
+  if (
+    status === 'searching' ||
+    status === 'loading' ||
+    status === 'proxying' ||
+    status === 'opening-search-page' ||
+    status === 'opening-target-page' ||
+    status === 'auto-switch-vnc'
+  ) {
+    return 'connecting';
+  }
+  return 'connected';
 }
 
 function sleep(ms: number): Promise<void> {

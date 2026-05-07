@@ -23,9 +23,7 @@ public final class TaskStateContextInjector {
     }
 
     public List<AiChatMessage> inject(List<AiChatMessage> baseMessages,
-                                      TaskExecutionState state,
-                                      AiChatMessage currentUserMessage,
-                                      ContextBudgetPolicy budgetPolicy) {
+                                      TaskExecutionState state) {
         if (baseMessages == null || baseMessages.isEmpty()) {
             return List.of();
         }
@@ -41,10 +39,7 @@ public final class TaskStateContextInjector {
         );
         List<AiChatMessage> enriched = new ArrayList<>(baseMessages);
         enriched.add(AiChatMessage.assistant(render(normalizedState)));
-        if (budgetPolicy == null) {
-            return enriched;
-        }
-        return budgetPolicy.trimForTotalLimit(enriched, currentUserMessage);
+        return enriched;
     }
 
     static String render(TaskExecutionState state) {

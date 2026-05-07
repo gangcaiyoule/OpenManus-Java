@@ -12,4 +12,9 @@ public class ExecutionRequest {
      * 用户输入内容
      */
     private String input;
+
+    /**
+     * 会话ID；为空时由服务端生成新会话。
+     */
+    private String sessionId;
 } 

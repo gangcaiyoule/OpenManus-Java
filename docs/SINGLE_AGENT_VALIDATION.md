@@ -27,13 +27,12 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 
 ```bash
 rg -n \
-  --glob '!src/test/java/com/openmanus/infra/architecture/SingleAgentArchitectureGuardTest.java' \
   "AgentHandoff|ThinkingAgent|SearchAgent|CodeAgent|FileAgent|ReflectionAgent|FastThinkWorkflow|ThinkDoReflectWorkflow|ThinkDoReflectService|SubAgentConfig" \
   src/main/java src/test/java
 ```
 
 Expected:
-- no matches after excluding the architecture guard test file.
+- no matches in source or test code.
 - this check is intentionally aligned with `scripts/validate-single-agent.sh` allowlist behavior.
 
 ## 2) Compile main code
@@ -55,13 +54,9 @@ Expected:
 - `AgentCoordinatorSmokeTest`: runtime-first single-agent loop handles tool planning and execution.
 - `AgentToolResultBudgetE2ETest`: large tool outputs are written to sandbox files and replaced with explicit stubs.
 - `PythonExecutionToolSmokeTest`: Python execution remains sandboxed and failure paths are handled.
-- `SearchToolSmokeTest`, `ShellToolSmokeTest`, `WebFetchToolSmokeTest`: core toolchain remains available after the migration.
-- `AgentControllerSessionSandboxStartTest` and `WebProxyControllerTest`: web entrypoints stay consistent with the new infra/web architecture.
-- `AgentControllerStreamEndpointTest`: unified streaming endpoint is available; removed legacy path returns `404`; unified endpoint keeps stable error mapping behavior.
-- `AgentControllerServiceContractTest`: verifies real service->controller contract for `errorCode -> HTTP status` (`400/503/500`) on unified path, including `INTERNAL_ERROR -> 500` (listener-registration failure), verifies that `errorCode` takes precedence over legacy `error` message when both exist but conflict, and additionally verifies controller fallback mapping for `UNKNOWN_ERROR -> 500`.
-- `SingleAgentArchitectureGuardTest`: legacy multi-agent classes/config/workflow remain absent.
-- `ValidationScriptsConsistencyTest`: validates `validate-single-agent.sh` and `mvnw-local.sh` stay consistent with script entrypoint and safe `JAVA_HOME` inference rules.
-- `MvnwLocalScriptIntegrationTest`: executes `mvnw-local.sh` in isolated temp directories to verify argument pass-through, invalid `JAVA_HOME` failure behavior, and no `/usr` fallback when canonical-path resolution is unavailable.
+- `SearchToolSmokeTest`, `ShellToolSmokeTest`, `WebFetchToolSmokeTest`, `BrowserToolSmokeTest`, `TaskReflectionToolSmokeTest`: core toolchain remains available after the migration.
+- `AgentControllerSessionSandboxStartTest`: web entrypoints stay consistent with the new infra/web architecture.
+- `FrontendProxyControllerTest`, `WebProxyControllerTest`: proxy controllers remain functional.
 - `validate-single-agent.sh` retries regression tests once only when Maven reports transient surefire bootstrap error (`Unable to access jarfile .../surefirebooter-*.jar`), clears `target/surefire` before retry, and preserves `target/surefire-reports` for diagnostics.
 - if the retry still fails, inspect `target/surefire-reports` from the first attempt for root-cause details.
 - retry flow logs stable CI tags for signature match, cleanup, retry start, and retry completion: `VALIDATE_RETRY_SIGNATURE_MATCHED`, `VALIDATE_RETRY_CLEANUP`, `VALIDATE_RETRY_STARTED`, `VALIDATE_RETRY_COMPLETED`.
@@ -113,23 +108,13 @@ Expected:
 Expected:
 - B can leverage message history without string-summary handoff.
 - By default, full tool-result messages are preserved in chat memory.
-- Tool-result compaction is optional and only active when `openmanus.chat-memory.compact-tool-results-enabled=true`.
+- Oversized tool results are optionally offloaded only when `openmanus.chat-memory.tool-result-budget-enabled=true`.
 - Chat-memory config precedence is `explicit config > env/system fallback > defaults`.
-- Context-window governance uses two independent limits:
-  - `openmanus.chat-memory.model-context-max-messages`: caps historical messages sent to model per round.
-  - `openmanus.chat-memory.model-context-max-total-messages`: caps total model-input messages per round (history + current turn).
-- Invalid negative values for the two model-context limits are sanitized to `0` (unlimited).
-- Both limits only affect model input payload, not persisted `ChatMemory` full history.
-- `model-context-max-total-messages=1` is an extreme mode: prioritize current user message continuity; do not expect system/history to be preserved in that round.
-- In tool-loop scenarios, avoid setting `model-context-max-total-messages` too small.
-  - `=2` keeps continuity by prioritizing current user + latest tool result.
-  - for production tool-heavy sessions, prefer `>=3` (or higher, such as 20/40 depending on model window).
-- If current-user identity matching fails in a defensive edge branch, total-limit trimming is still enforced (no bypass of `model-context-max-total-messages`).
+- Current model requests no longer apply local message-window trimming, historical summarization, or token-budget clipping.
 
 Recommended Manus-style tuning:
-- Start with `model-context-max-messages=20` and keep `model-context-max-total-messages=0` for continuity-first scenarios.
-- If one `execute` may trigger many tool rounds with large outputs, set `model-context-max-total-messages` (for example `40`) as a hard protection cap.
-- Keep `compact-tool-results-enabled=false` unless storage/network pressure requires compaction.
+- Keep `tool-result-budget-enabled=false` when you want full tool outputs inline.
+- Enable `tool-result-budget-enabled=true` when one `execute` may produce very large tool outputs and you prefer explicit shell reads over larger provider payloads.
 
 ## 6) Sandbox isolation verification
 

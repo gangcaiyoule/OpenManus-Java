@@ -6,12 +6,16 @@ import com.github.dockerjava.api.command.InspectExecResponse;
 import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.core.command.ExecStartResultCallback;
 import com.openmanus.infra.config.OpenManusProperties;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Map;
@@ -82,8 +86,13 @@ public class SandboxClient implements Closeable {
     }
 
     public ExecutionResult executePython(String sessionId, String script, int timeoutSeconds) {
-        String command = "python3 -c " + escapeShellArgument(script);
-        return executeCommand(sessionId, command, null, timeoutSeconds);
+        SessionContainer container = ensureSessionContainer(sessionId);
+        return executeInContainer(
+                container.containerId(),
+                "python3 -",
+                timeoutSeconds,
+                stdinOf(script)
+        );
     }
 
     public String readTextFile(String sessionId, String path) {
@@ -102,21 +111,28 @@ public class SandboxClient implements Closeable {
     }
 
     public void writeTextFile(String sessionId, String path, String content) {
-        String encoded = java.util.Base64.getEncoder().encodeToString(
-                (content == null ? "" : content).getBytes(StandardCharsets.UTF_8));
-        String script = """
-                from pathlib import Path
-                import base64
-                file_path = Path(%s)
-                file_path.parent.mkdir(parents=True, exist_ok=True)
-                file_path.write_text(base64.b64decode(%s).decode('utf-8'), encoding='utf-8')
-                """.formatted(toPythonStringLiteral(path), toPythonStringLiteral(encoded));
-        ExecutionResult result = executeInContainer(
-                ensureSessionContainer(sessionId).containerId(),
-                "python3 - <<'PY'\n" + script + "\nPY",
-                config.getTimeout());
-        if (!result.isSuccess()) {
-            throw new RuntimeException("写入沙箱文件失败: " + result.getStderr());
+        SessionContainer container = ensureSessionContainer(sessionId);
+        String normalizedPath = normalizeContainerPath(path);
+        String remoteDir = remoteDirOf(normalizedPath);
+        String fileName = fileNameOf(normalizedPath);
+
+        ExecutionResult mkdirResult = executeInContainer(
+                container.containerId(),
+                "mkdir -p " + escapeShellArgument(remoteDir),
+                config.getTimeout()
+        );
+        if (!mkdirResult.isSuccess()) {
+            throw new RuntimeException("写入沙箱文件失败: " + mkdirResult.getStderr());
+        }
+
+        try {
+            dockerManager.getClient()
+                    .copyArchiveToContainerCmd(container.containerId())
+                    .withRemotePath(remoteDir)
+                    .withTarInputStream(singleFileTarArchive(fileName, content))
+                    .exec();
+        } catch (Exception e) {
+            throw new RuntimeException("写入沙箱文件失败: " + e.getMessage(), e);
         }
     }
 
@@ -150,11 +166,19 @@ public class SandboxClient implements Closeable {
     }
 
     private ExecutionResult executeInContainer(String containerId, String command, int timeoutSeconds) {
+        return executeInContainer(containerId, command, timeoutSeconds, null);
+    }
+
+    private ExecutionResult executeInContainer(String containerId,
+                                              String command,
+                                              int timeoutSeconds,
+                                              InputStream stdin) {
         try {
             ExecCreateCmdResponse execCmd = dockerManager.getClient()
                     .execCreateCmd(containerId)
                     .withAttachStdout(true)
                     .withAttachStderr(true)
+                    .withAttachStdin(stdin != null)
                     .withCmd("/bin/sh", "-lc", command)
                     .exec();
 
@@ -162,7 +186,11 @@ public class SandboxClient implements Closeable {
             ByteArrayOutputStream stderr = new ByteArrayOutputStream();
             @SuppressWarnings("deprecation")
             ExecStartResultCallback callback = new ExecStartResultCallback(stdout, stderr);
-            dockerManager.getClient().execStartCmd(execCmd.getId()).exec(callback);
+            var execStart = dockerManager.getClient().execStartCmd(execCmd.getId());
+            if (stdin != null) {
+                execStart.withStdIn(stdin);
+            }
+            execStart.exec(callback);
 
             int timeout = timeoutSeconds > 0 ? timeoutSeconds : config.getTimeout();
             boolean completed = callback.awaitCompletion(timeout, TimeUnit.SECONDS);
@@ -205,6 +233,52 @@ public class SandboxClient implements Closeable {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 + "'";
+    }
+
+    private static InputStream stdinOf(String value) {
+        return new ByteArrayInputStream((value == null ? "" : value).getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String normalizeContainerPath(String path) {
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException("path cannot be blank");
+        }
+        return path;
+    }
+
+    private static String remoteDirOf(String path) {
+        int lastSlash = path.lastIndexOf('/');
+        if (lastSlash < 0) {
+            return ".";
+        }
+        if (lastSlash == 0) {
+            return "/";
+        }
+        return path.substring(0, lastSlash);
+    }
+
+    private static String fileNameOf(String path) {
+        int lastSlash = path.lastIndexOf('/');
+        String fileName = lastSlash < 0 ? path : path.substring(lastSlash + 1);
+        if (fileName.isBlank()) {
+            throw new IllegalArgumentException("path must include a file name");
+        }
+        return fileName;
+    }
+
+    private static InputStream singleFileTarArchive(String fileName, String content) throws IOException {
+        byte[] bytes = (content == null ? "" : content).getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(output)) {
+            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX);
+            TarArchiveEntry entry = new TarArchiveEntry(fileName);
+            entry.setSize(bytes.length);
+            tar.putArchiveEntry(entry);
+            tar.write(bytes);
+            tar.closeArchiveEntry();
+            tar.finish();
+        }
+        return new ByteArrayInputStream(output.toByteArray());
     }
 
     @Override

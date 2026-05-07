@@ -1,5 +1,6 @@
 package com.openmanus.domain.service;
 
+import com.openmanus.domain.model.ExecutionErrorCodes;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -18,14 +19,18 @@ public class ConversationApplicationService {
     private static final String EXECUTION_COMPLETE = "EXECUTION_COMPLETE";
     private static final String EXECUTION_ERROR = "EXECUTION_ERROR";
     private static final String DEFAULT_USER_ID = "001";
+    private static final String SESSION_BUSY_MESSAGE = "当前会话正在执行中，请稍后重试";
 
     private final AgentExecutionPort agentExecutionPort;
     private final ExecutionEventPort executionEventPort;
+    private final SessionExecutionGuard sessionExecutionGuard;
 
     public ConversationApplicationService(AgentExecutionPort agentExecutionPort,
-                                          ExecutionEventPort executionEventPort) {
+                                          ExecutionEventPort executionEventPort,
+                                          SessionExecutionGuard sessionExecutionGuard) {
         this.agentExecutionPort = agentExecutionPort;
         this.executionEventPort = executionEventPort;
+        this.sessionExecutionGuard = sessionExecutionGuard;
     }
 
     /**
@@ -43,12 +48,21 @@ public class ConversationApplicationService {
         if (message == null || message.trim().isEmpty()) {
             Map<String, Object> errorResult = new HashMap<>();
             errorResult.put("error", "message不能为空");
+            errorResult.put("errorCode", ExecutionErrorCodes.INPUT_INVALID);
             errorResult.put("conversationId", sessionId);
             return CompletableFuture.completedFuture(errorResult);
         }
+
+        if (!sessionExecutionGuard.tryAcquire(sessionId)) {
+            return CompletableFuture.completedFuture(busyResult(sessionId));
+        }
         
         if (sync) {
-            return CompletableFuture.completedFuture(executeSyncWithMonitoring(message, sessionId));
+            try {
+                return CompletableFuture.completedFuture(executeSyncWithMonitoring(message, sessionId));
+            } finally {
+                sessionExecutionGuard.release(sessionId);
+            }
         } else {
             try (MDC.MDCCloseable ignoredSession = MDC.putCloseable("sessionId", sessionId);
                  MDC.MDCCloseable ignoredUser = MDC.putCloseable("userId", userId)) {
@@ -56,8 +70,10 @@ public class ConversationApplicationService {
                 CompletableFuture<String> executionFuture = agentExecutionPort.execute(message, sessionId);
                 return executionFuture
                         .thenApply(response -> completeSuccess(sessionId, response))
-                        .exceptionally(e -> completeFailure(sessionId, unwrapException(e), "Error in async chat execution"));
+                        .exceptionally(e -> completeFailure(sessionId, unwrapException(e), "Error in async chat execution"))
+                        .whenComplete((ignored, throwable) -> sessionExecutionGuard.release(sessionId));
             } catch (Exception e) {
+                sessionExecutionGuard.release(sessionId);
                 return CompletableFuture.completedFuture(
                         completeFailure(sessionId, e, "Error before async chat execution started")
                 );
@@ -143,6 +159,14 @@ public class ConversationApplicationService {
     private static Map<String, Object> errorResult(String sessionId, String message) {
         Map<String, Object> errorResult = new HashMap<>();
         errorResult.put("error", message);
+        errorResult.put("conversationId", sessionId);
+        return errorResult;
+    }
+
+    private static Map<String, Object> busyResult(String sessionId) {
+        Map<String, Object> errorResult = new HashMap<>();
+        errorResult.put("error", SESSION_BUSY_MESSAGE);
+        errorResult.put("errorCode", ExecutionErrorCodes.SESSION_BUSY);
         errorResult.put("conversationId", sessionId);
         return errorResult;
     }

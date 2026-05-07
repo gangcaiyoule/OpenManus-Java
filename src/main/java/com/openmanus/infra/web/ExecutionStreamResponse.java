@@ -14,6 +14,9 @@ public class ExecutionStreamResponse {
     @JsonProperty("session_id")
     String sessionId;
 
+    @JsonProperty("execution_id")
+    String executionId;
+
     String topic;
     String error;
     String errorCode;
