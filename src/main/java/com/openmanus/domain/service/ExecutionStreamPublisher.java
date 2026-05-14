@@ -5,7 +5,7 @@ import com.openmanus.domain.model.ExecutionResultView;
 
 public interface ExecutionStreamPublisher {
 
-    void publishEvent(String sessionId, AgentExecutionEvent event);
+    void publishEvent(String topic, AgentExecutionEvent event);
 
-    void publishResult(String sessionId, ExecutionResultView result);
+    void publishResult(String topic, ExecutionResultView result);
 }
