@@ -13,8 +13,6 @@ import java.util.Map;
 
 @Component
 public class WebSocketExecutionStreamPublisher implements ExecutionStreamPublisher {
-
-    private static final String EXECUTION_TOPIC_PREFIX = "/topic/executions/";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private final SimpMessagingTemplate messagingTemplate;
@@ -24,22 +22,22 @@ public class WebSocketExecutionStreamPublisher implements ExecutionStreamPublish
     }
 
     @Override
-    public void publishEvent(String sessionId, AgentExecutionEvent event) {
-        messagingTemplate.convertAndSend(EXECUTION_TOPIC_PREFIX + sessionId, event);
-        publishThoughtLog(sessionId, event);
+    public void publishEvent(String topic, AgentExecutionEvent event) {
+        messagingTemplate.convertAndSend(topic, event);
+        publishThoughtLog(topic, event);
     }
 
     @Override
-    public void publishResult(String sessionId, ExecutionResultView result) {
-        messagingTemplate.convertAndSend(EXECUTION_TOPIC_PREFIX + sessionId + "/result", result);
+    public void publishResult(String topic, ExecutionResultView result) {
+        messagingTemplate.convertAndSend(topic + "/result", result);
     }
 
-    private void publishThoughtLog(String sessionId, AgentExecutionEvent event) {
+    private void publishThoughtLog(String topic, AgentExecutionEvent event) {
         String message = formatThoughtMessage(event);
         if (message == null || message.isBlank()) {
             return;
         }
-        messagingTemplate.convertAndSend(EXECUTION_TOPIC_PREFIX + sessionId + "/logs", logPayload(sessionId, message));
+        messagingTemplate.convertAndSend(topic + "/logs", logPayload(event == null ? null : event.getSessionId(), message));
     }
 
     private String formatThoughtMessage(AgentExecutionEvent event) {
