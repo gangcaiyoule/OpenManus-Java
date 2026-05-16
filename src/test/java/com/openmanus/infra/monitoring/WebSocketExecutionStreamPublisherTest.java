@@ -1,6 +1,7 @@
 package com.openmanus.infra.monitoring;
 
 import com.openmanus.domain.model.AgentExecutionEvent;
+import com.openmanus.domain.model.ExecutionResultView;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -15,6 +16,8 @@ import static org.mockito.Mockito.verify;
 @DisplayName("WebSocketExecutionStreamPublisher Tests")
 class WebSocketExecutionStreamPublisherTest {
 
+    private static final String TOPIC = "/topic/executions/session-1/execution-1";
+
     private final SimpMessagingTemplate messagingTemplate = mock(SimpMessagingTemplate.class);
     private final WebSocketExecutionStreamPublisher publisher = new WebSocketExecutionStreamPublisher(messagingTemplate);
 
@@ -27,10 +30,10 @@ class WebSocketExecutionStreamPublisherTest {
                 .input("think about next step")
                 .build();
 
-        publisher.publishEvent("session-1/execution-1", event);
+        publisher.publishEvent(TOPIC, event);
 
         verify(messagingTemplate).convertAndSend(
-                eq("/topic/executions/session-1/execution-1/logs"),
+                eq(TOPIC + "/logs"),
                 (Object) argThat(payload -> hasLogMessage(payload, "模型请求\nthink about next step"))
         );
     }
@@ -46,11 +49,29 @@ class WebSocketExecutionStreamPublisherTest {
                 .status("ERROR")
                 .build();
 
-        publisher.publishEvent("session-1/execution-1", event);
+        publisher.publishEvent(TOPIC, event);
 
         verify(messagingTemplate).convertAndSend(
-                eq("/topic/executions/session-1/execution-1/logs"),
+                eq(TOPIC + "/logs"),
                 (Object) argThat(payload -> hasLogMessage(payload, "执行完成\n执行出错: boom"))
+        );
+    }
+
+    @Test
+    @DisplayName("should publish final result to matching execution topic")
+    void shouldPublishFinalResultToMatchingExecutionTopic() {
+        ExecutionResultView result = ExecutionResultView.builder()
+                .sessionId("session-1")
+                .result("hello")
+                .status("SUCCESS")
+                .build();
+
+        publisher.publishResult(TOPIC, result);
+
+        verify(messagingTemplate).convertAndSend(
+                eq(TOPIC + "/result"),
+                argThat(payload -> payload instanceof ExecutionResultView view
+                        && "hello".equals(view.getResult()))
         );
     }
 
