@@ -13,14 +13,14 @@
 [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-Ready-blue)](Dockerfile)
 
-[🚀 Quick Start](#-quick-start) ·
-[🎯 Features](#-features) ·
-[🏗️ Architecture](#-architecture) ·
-[🔧 Tool System](#-tool-system) ·
-[⚙️ Configuration](#-configuration) ·
-[📊 API Reference](#-api-reference)
+[Quick Start](#-quick-start) ·
+[Features](#-features) ·
+[Architecture](#-architecture) ·
+[Tool System](#-tool-system) ·
+[Configuration](#-configuration) ·
+[API Reference](#-api-reference)
 
-## 📋 Project Overview
+## Project Overview
 
 OpenManusJava is an intelligent agent framework built with Spring Boot, featuring a single-agent ReAct (Reason-Act) loop architecture. It provides provider-agnostic LLM integration, a pluggable annotation-driven tool system, session-scoped sandboxed code execution, and a modern 3-column web workspace with real-time execution streaming.
 
@@ -31,16 +31,16 @@ OpenManusJava is an intelligent agent framework built with Spring Boot, featurin
 - **Runtime-First AI Framework** — The `aiframework` layer abstracts LLM calls behind `AiChatModel`, with pluggable `ProviderRequestAssembler` / `ProviderResponseParser` pairs for OpenAI, Anthropic, and Gemini.
 - **Context Assembly** — Full chat history stays in memory, task-state cards are injected when needed, and oversized tool results are replaced with explicit stubs before the next model round.
 
-## 🎯 Features
+## Features
 
-### 🧠 Unified Single-Agent Reasoning
+### Unified Single-Agent Reasoning
 
 - **Single ReAct Loop**: `AgentCoordinator` orchestrates Thinking → Search → Code/File → Reflection in one loop
 - **No Agent Handoff**: No supervisor/sub-agent string handoff or nested executor loops
 - **Session Memory Continuity**: Full message history persisted by `ChatMemory` (file or in-memory store)
 - **Tool-Result Budget**: Oversized tool outputs are offloaded to sandbox files and replaced with explicit stubs before the next model round
 
-### 🔌 Multi-Provider LLM Support
+### Multi-Provider LLM Support
 
 - **OpenAI** (and all OpenAI-compatible APIs)
 - **Anthropic** (Claude)
@@ -48,7 +48,7 @@ OpenManusJava is an intelligent agent framework built with Spring Boot, featurin
 
 Each provider has its own `RequestAssembler` + `ResponseParser` + `Client` triplet; swapping providers requires only a config change.
 
-### 🔧 Tool Ecosystem
+### Tool Ecosystem
 
 | Tool | Name | Description |
 |------|------|-------------|
@@ -60,7 +60,7 @@ Each provider has its own `RequestAssembler` + `ResponseParser` + `Client` tripl
 | **Task Reflection** | `recordTask`, `reflectOnTask`, `getTaskHistory` | Record and analyze task execution history |
 | **MCP** | *(dynamic)* | Optional Model Context Protocol integration for external tool discovery |
 
-### 🎨 Web Workspace
+### Web Workspace
 
 - **Modern 3-Column Layout**:
   - **Left**: Intelligent chat panel for core interaction
@@ -70,15 +70,13 @@ Each provider has its own `RequestAssembler` + `ResponseParser` + `Client` tripl
 - **Web Proxy Mode**: Backend proxy for sites that block iframe embedding via `X-Frame-Options` / CSP
 - **Responsive Design**: Adapts to desktop, tablet, and mobile devices
 
-### 🖼️ UI Preview
+### Frontend Preview
 
-![Workspace Overview](docs/img01.png)
-
-![Web Preview (Proxy Mode)](docs/img02.png)
+![Frontend Workspace Preview](frontend/openmanus-frontend.png)
 
 > Some websites block iframe embedding via `X-Frame-Options` or CSP `frame-ancestors`. If you see a preview error, enable the **"Proxy"** toggle in the address bar to load the page through the backend proxy.
 
-## 🏗️ Architecture
+## Architecture
 
 ### Core Architecture Diagram
 
@@ -203,7 +201,7 @@ com.openmanus
 | Code Quality | Checkstyle + SpotBugs + OWASP + JaCoCo | Static analysis, security, coverage |
 | Containerization | Docker multi-stage build | Production deployment |
 
-## 🔧 Tool System
+## Tool System
 
 ### Annotation-Driven Tool Registration
 
@@ -306,7 +304,7 @@ openmanus:
     tool-result-budget-decay-chars: 0
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -367,7 +365,7 @@ npm run test         # Vitest unit tests
 
 In development mode, Spring Boot proxies frontend requests to the Vite dev server configured at `openmanus.frontend.dev-server-url`.
 
-## 📊 API Reference
+## API Reference
 
 ### Chat API (HTTP)
 
@@ -420,23 +418,18 @@ curl -X POST http://localhost:8089/api/agent/session/{sessionId}/sandbox/start
 
 Swagger UI: http://localhost:8089/swagger-ui.html
 
-## 🧪 Testing & Quality
+## 🧪 Testing & Evaluation
 
-The project uses a multi-layer testing strategy:
+Start here: `./scripts/run-eval.sh bench`
 
-```bash
-# Unit & integration tests (excludes e2e and live-smoke groups)
-mvn test
+| Goal | Command | When to use |
+|---|---|---|
+| Local benchmark baseline | `./scripts/run-eval.sh bench` | Demos and daily regression |
+| End-to-end validation | `./scripts/run-eval.sh e2e` | API / WebSocket flow checks |
+| Real-provider smoke | `./scripts/run-eval.sh live` | Provider, TLS, and credential checks |
+| Coverage report | `./scripts/mvnw-local.sh -q verify` | JaCoCo report |
 
-# End-to-end tests
-mvn test -Dgroups=e2e
-
-# Live smoke tests (requires real API keys)
-mvn test -Dgroups=live-smoke -Dopenmanus.liveSmoke.enabled=true
-
-# Code coverage report (JaCoCo, target: 70%+)
-mvn verify
-```
+See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the benchmark design notes.
 
 **Quality gates:**
 - **Checkstyle** — Google Java style (validate phase)
@@ -444,18 +437,18 @@ mvn verify
 - **OWASP Dependency Check** — CVE scanning (CVSS 7+ fails build)
 - **JaCoCo** — Code coverage ≥ 70% instruction coverage
 
-## 📬 Contact
+## Contact
 
 - WeChat: leochame007
 - Email: liulch.cn@gmail.com
 
-## 🙏 Acknowledgements
+## Acknowledgements
 
 - [Spring Boot](https://spring.io/projects/spring-boot)
 - [docker-java](https://github.com/docker-java/docker-java)
 - [SpringDoc OpenAPI](https://springdoc.org)
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
 

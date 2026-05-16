@@ -1,5 +1,9 @@
 # OpenManus Frontend (React + Vite)
 
+## Preview
+
+![Frontend Workspace Preview](openmanus-frontend.png)
+
 ## Quick Start
 
 ```bash
