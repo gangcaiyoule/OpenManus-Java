@@ -18,12 +18,17 @@ export class ApiError extends Error {
 }
 
 export async function startWorkflow(payload: WorkflowRequestPayload): Promise<StreamStartResponse> {
-  const response = await fetch('/api/agent/workflow-stream', {
+  const agentTeam = payload.agentTeam === true;
+  const requestPayload = {
+    input: payload.input,
+    sessionId: payload.sessionId
+  };
+  const response = await fetch('/api/agent/workflow-stream' + (agentTeam ? '?agentTeam=true' : ''), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(requestPayload)
   });
 
   const data = (await response.json()) as StreamStartResponse;

@@ -99,7 +99,8 @@ export default function App(): JSX.Element {
 
       const startData = await startWorkflow({
         input: content,
-        sessionId: state.sessionId || undefined
+        sessionId: state.sessionId || undefined,
+        agentTeam: true
       });
       const sessionId = startData.session_id || startData.sessionId || '';
       const topic = startData.topic || '';

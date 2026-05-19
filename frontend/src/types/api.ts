@@ -83,6 +83,7 @@ export interface SessionInfoPayload {
 export interface WorkflowRequestPayload {
   input: string;
   sessionId?: string;
+  agentTeam?: boolean;
 }
 
 export interface ThoughtStep {

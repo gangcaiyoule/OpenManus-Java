@@ -1,5 +1,8 @@
 package com.openmanus.infra.config;
 
+import com.openmanus.agentteam.application.AgentTeamApplicationService;
+import com.openmanus.agentteam.application.AgentTeamConversationApplicationService;
+import com.openmanus.agentteam.application.AgentTeamExecutionStreamingApplicationService;
 import com.openmanus.domain.service.ConversationApplicationService;
 import com.openmanus.domain.service.AgentExecutionPort;
 import com.openmanus.domain.service.ExecutionStreamingApplicationService;
@@ -36,6 +39,36 @@ public class DomainServiceConfig {
                                                                              SessionExecutionGuard sessionExecutionGuard) {
         return new ExecutionStreamingApplicationService(
                 agentExecutionPort,
+                executionEventPort,
+                streamPublisher,
+                asyncExecutor,
+                sessionExecutionGuard
+        );
+    }
+
+    @Bean
+    AgentTeamConversationApplicationService agentTeamConversationApplicationService(
+            AgentTeamApplicationService agentTeamApplicationService,
+            ExecutionEventPort executionEventPort,
+            SessionExecutionGuard sessionExecutionGuard,
+            @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor) {
+        return new AgentTeamConversationApplicationService(
+                agentTeamApplicationService,
+                executionEventPort,
+                sessionExecutionGuard,
+                asyncExecutor
+        );
+    }
+
+    @Bean
+    AgentTeamExecutionStreamingApplicationService agentTeamExecutionStreamingApplicationService(
+            AgentTeamApplicationService agentTeamApplicationService,
+            ExecutionEventPort executionEventPort,
+            ExecutionStreamPublisher streamPublisher,
+            @Qualifier(AsyncConfig.ASYNC_EXECUTOR_NAME) Executor asyncExecutor,
+            SessionExecutionGuard sessionExecutionGuard) {
+        return new AgentTeamExecutionStreamingApplicationService(
+                agentTeamApplicationService,
                 executionEventPort,
                 streamPublisher,
                 asyncExecutor,

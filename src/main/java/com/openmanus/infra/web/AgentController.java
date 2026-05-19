@@ -1,11 +1,14 @@
 package com.openmanus.infra.web;
 
+import com.openmanus.agentteam.application.AgentTeamConversationApplicationService;
+import com.openmanus.agentteam.application.AgentTeamExecutionStreamingApplicationService;
 import com.openmanus.domain.model.ExecutionErrorCodes;
 import com.openmanus.domain.model.ExecutionRequest;
 import com.openmanus.domain.model.ExecutionResponse;
 import com.openmanus.domain.service.ConversationApplicationService;
 import com.openmanus.domain.service.ExecutionStreamingApplicationService;
 import com.openmanus.domain.service.SessionIdPolicy;
+import com.openmanus.infra.config.AgentTeamProperties;
 import com.openmanus.sandbox.domain.model.SessionSandboxInfo;
 import com.openmanus.sandbox.application.SandboxSessionApplicationService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,15 +34,24 @@ public class AgentController {
     private static final String ERROR_ASYNC_SUBMIT_FAILED = "任务提交失败，请稍后重试";
     private static final String ERROR_ASYNC_SUBMIT_EXCEPTION = "任务提交异常，请稍后重试";
     private final ConversationApplicationService conversationApplicationService;
+    private final AgentTeamConversationApplicationService agentTeamConversationApplicationService;
+    private final AgentTeamExecutionStreamingApplicationService agentTeamExecutionStreamingApplicationService;
     private final ExecutionStreamingApplicationService executionStreamingApplicationService;
+    private final AgentTeamProperties agentTeamProperties;
     private final SandboxSessionApplicationService sandboxSessionApplicationService;
-    
+
     public AgentController(
             ConversationApplicationService conversationApplicationService,
+            AgentTeamConversationApplicationService agentTeamConversationApplicationService,
+            AgentTeamExecutionStreamingApplicationService agentTeamExecutionStreamingApplicationService,
             ExecutionStreamingApplicationService executionStreamingApplicationService,
+            AgentTeamProperties agentTeamProperties,
             SandboxSessionApplicationService sandboxSessionApplicationService) {
         this.conversationApplicationService = conversationApplicationService;
+        this.agentTeamConversationApplicationService = agentTeamConversationApplicationService;
+        this.agentTeamExecutionStreamingApplicationService = agentTeamExecutionStreamingApplicationService;
         this.executionStreamingApplicationService = executionStreamingApplicationService;
+        this.agentTeamProperties = agentTeamProperties;
         this.sandboxSessionApplicationService = sandboxSessionApplicationService;
     }
     /**
@@ -58,6 +70,7 @@ public class AgentController {
     public CompletableFuture<ResponseEntity<Map<String, Object>>> chat(
             @RequestBody Map<String, String> payload,
             @RequestParam(defaultValue = "false") boolean stateful,
+            @RequestParam(defaultValue = "false") boolean agentTeam,
             @RequestParam(defaultValue = "false") boolean sync) {
 
         String message = payload.get("message");
@@ -74,10 +87,12 @@ public class AgentController {
         }
 
         try {
-            return conversationApplicationService.chat(message, conversationId, sync)
-                    .handle((result, throwable) -> throwable == null
-                            ? toChatResponse(result)
-                            : buildChatInternalErrorResponse(conversationId));
+            CompletableFuture<Map<String, Object>> execution = shouldUseAgentTeam(agentTeam)
+                    ? agentTeamConversationApplicationService.chat(message, conversationId, sync)
+                    : conversationApplicationService.chat(message, conversationId, sync);
+            return execution.handle((result, throwable) -> throwable == null
+                    ? toChatResponse(result)
+                    : buildChatInternalErrorResponse(conversationId));
         } catch (RuntimeException e) {
             return CompletableFuture.completedFuture(buildChatInternalErrorResponse(conversationId));
         }
@@ -95,12 +110,18 @@ public class AgentController {
             description = "Runs the same agent execution pipeline and returns a session ID for WebSocket streaming."
     )
     public ResponseEntity<ExecutionStreamResponse> executionStream(
-            @RequestBody ExecutionRequest executionRequest) {
+            @RequestBody ExecutionRequest executionRequest,
+            @RequestParam(defaultValue = "false") boolean agentTeam) {
         String userInput = executionRequest.getInput();
-        ExecutionResponse serviceResult = executionStreamingApplicationService.executeAndStreamEvents(
-                userInput,
-                executionRequest.getSessionId()
-        );
+        ExecutionResponse serviceResult = shouldUseAgentTeam(agentTeam)
+                ? agentTeamExecutionStreamingApplicationService.executeAndStreamEvents(
+                        userInput,
+                        executionRequest.getSessionId()
+                )
+                : executionStreamingApplicationService.executeAndStreamEvents(
+                        userInput,
+                        executionRequest.getSessionId()
+                );
 
         if (!serviceResult.isSuccess()) {
             HttpStatus status = resolveErrorStatus(serviceResult.getErrorCode(), serviceResult.getError());
@@ -222,6 +243,10 @@ public class AgentController {
 
     private static String normalizeConversationId(String rawConversationId) {
         return SessionIdPolicy.normalizeOrNull(rawConversationId);
+    }
+
+    private boolean shouldUseAgentTeam(boolean agentTeamRequested) {
+        return agentTeamRequested && agentTeamProperties.isEnabled();
     }
 
     /**
