@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Main orchestration entry for the V1 agent-team flow.
+ * Team master orchestration entry for the V1 agent-team flow.
  */
 @Slf4j
 public class MasterAgentOrchestrator {
@@ -54,25 +54,25 @@ public class MasterAgentOrchestrator {
     public String execute(String userInput, String conversationId) {
         DecompositionPlan plan = decompositionService.decompose(userInput, maxSubTasksPerGroup);
         log.info(
-                "MasterAgent decomposition finished: parallelizable={}, subTaskCount={}, reason={}",
+                "TeamMaster decomposition finished: parallelizable={}, subTaskCount={}, reason={}",
                 plan.parallelizable(),
                 plan.subTasks() == null ? 0 : plan.subTasks().size(),
                 plan.reason()
         );
         if (!plan.parallelizable()) {
-            log.info("MasterAgent falling back to single-agent execution: conversationId={}", conversationId);
+            log.info("TeamMaster falling back to single-agent execution: conversationId={}", conversationId);
             return agentExecutionPort.executeSync(userInput, conversationId);
         }
 
         workerManager.ensureStarted();
         TaskGroup taskGroup = taskGroupManager.createGroup(
                 conversationId == null || conversationId.isBlank() ? UUID.randomUUID().toString() : conversationId,
-                "master-agent",
+                "team-master",
                 userInput
         );
         List<SubTask> subTasks = materializeSubTasks(taskGroup.getGroupId(), plan.subTasks());
         log.info(
-                "MasterAgent created task group: groupId={}, conversationId={}, subTaskCount={}",
+                "TeamMaster created task group: groupId={}, conversationId={}, subTaskCount={}",
                 taskGroup.getGroupId(),
                 conversationId,
                 subTasks.size()
@@ -80,7 +80,7 @@ public class MasterAgentOrchestrator {
         taskGroupManager.registerSubTasks(taskGroup.getGroupId(), subTasks);
         for (SubTask subTask : subTasks) {
             log.info(
-                    "MasterAgent submitting subtask to pool: groupId={}, taskId={}, title={}",
+                    "TeamMaster submitting subtask to pool: groupId={}, taskId={}, title={}",
                     taskGroup.getGroupId(),
                     subTask.getTaskId(),
                     subTask.getTitle()
@@ -94,7 +94,7 @@ public class MasterAgentOrchestrator {
                 taskPoolPort.findByGroupId(taskGroup.getGroupId())
         );
         log.info(
-                "MasterAgent aggregation finished: groupId={}, status={}, successCount={}, failedCount={}",
+                "TeamMaster aggregation finished: groupId={}, status={}, successCount={}, failedCount={}",
                 taskGroup.getGroupId(),
                 snapshot.status(),
                 snapshot.succeededTasks(),

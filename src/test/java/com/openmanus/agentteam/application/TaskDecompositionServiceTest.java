@@ -23,6 +23,16 @@ class TaskDecompositionServiceTest {
         }
 
         @Override
+        public String teamMasterSystemPromptTemplate() {
+            return "unused";
+        }
+
+        @Override
+        public String subAgentSystemPromptTemplate() {
+            return "unused";
+        }
+
+        @Override
         public String subAgentExecutionPromptTemplate() {
             return "unused";
         }

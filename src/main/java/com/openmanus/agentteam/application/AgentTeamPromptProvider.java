@@ -7,5 +7,9 @@ public interface AgentTeamPromptProvider {
 
     String taskDecompositionPromptTemplate();
 
+    String teamMasterSystemPromptTemplate();
+
+    String subAgentSystemPromptTemplate();
+
     String subAgentExecutionPromptTemplate();
 }

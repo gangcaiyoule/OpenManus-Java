@@ -1,38 +1,40 @@
 package com.openmanus.agentteam.application;
 
 import com.openmanus.agentteam.domain.model.SubTask;
-import com.openmanus.domain.service.AgentExecutionPort;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
 
 /**
- * Executes one subtask by reusing the existing single-agent execution path.
+ * Executes one subtask through the role-scoped sub-agent runtime.
+ *
+ * <p>This service remains a thin application-layer bridge and deliberately does not own
+ * task scheduling or result aggregation decisions.</p>
  */
 @Slf4j
 public class SubAgentExecutionService {
 
-    private final AgentExecutionPort agentExecutionPort;
+    private final AgentTeamRoleExecutionPort roleExecutionPort;
     private final AgentTeamPromptProvider promptProvider;
 
     public SubAgentExecutionService(
-            AgentExecutionPort agentExecutionPort,
+            AgentTeamRoleExecutionPort roleExecutionPort,
             AgentTeamPromptProvider promptProvider
     ) {
-        this.agentExecutionPort = agentExecutionPort;
+        this.roleExecutionPort = roleExecutionPort;
         this.promptProvider = promptProvider;
     }
 
     public SubTaskExecutionOutput execute(SubTask subTask, String agentId) {
         String prompt = buildSubTaskPrompt(subTask, agentId);
         log.info(
-                "SubAgentExecution dispatching to single-agent runtime: agentId={}, groupId={}, taskId={}, title={}",
+                "SubAgentExecution dispatching to role-scoped runtime: agentId={}, groupId={}, taskId={}, title={}",
                 agentId,
                 subTask.getGroupId(),
                 subTask.getTaskId(),
                 subTask.getTitle()
         );
-        String result = agentExecutionPort.executeSync(prompt, subTask.getTaskId());
+        String result = roleExecutionPort.executeSync(AgentTeamRole.SUB_AGENT, prompt, subTask.getTaskId());
         String summary = summarize(result);
         log.info(
                 "SubAgentExecution finished runtime call: agentId={}, groupId={}, taskId={}, title={}, summary={}",

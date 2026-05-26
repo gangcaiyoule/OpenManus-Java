@@ -14,6 +14,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ClasspathAgentTeamPromptProvider implements AgentTeamPromptProvider {
 
     private static final String TASK_DECOMPOSITION_TEMPLATE = "prompts/agentteam/task-decomposition.prompt.md";
+    private static final String TEAM_MASTER_SYSTEM_TEMPLATE = "prompts/agentteam/team-master-system.prompt.md";
+    private static final String SUB_AGENT_SYSTEM_TEMPLATE = "prompts/agentteam/subagent-system.prompt.md";
     private static final String SUB_AGENT_EXECUTION_TEMPLATE = "prompts/agentteam/subagent-execution.prompt.md";
 
     private final Map<String, String> cache = new ConcurrentHashMap<>();
@@ -21,6 +23,16 @@ public class ClasspathAgentTeamPromptProvider implements AgentTeamPromptProvider
     @Override
     public String taskDecompositionPromptTemplate() {
         return load(TASK_DECOMPOSITION_TEMPLATE);
+    }
+
+    @Override
+    public String teamMasterSystemPromptTemplate() {
+        return load(TEAM_MASTER_SYSTEM_TEMPLATE);
+    }
+
+    @Override
+    public String subAgentSystemPromptTemplate() {
+        return load(SUB_AGENT_SYSTEM_TEMPLATE);
     }
 
     @Override

@@ -37,6 +37,16 @@ class MasterAgentOrchestratorTest {
         }
 
         @Override
+        public String teamMasterSystemPromptTemplate() {
+            return "You are the team master";
+        }
+
+        @Override
+        public String subAgentSystemPromptTemplate() {
+            return "You are the subagent";
+        }
+
+        @Override
         public String subAgentExecutionPromptTemplate() {
             return """
                     agentId={{agentId}}
@@ -47,6 +57,12 @@ class MasterAgentOrchestratorTest {
                     """;
         }
     };
+
+    private SubAgentExecutionService subAgentExecutionService(AgentExecutionPort agentExecutionPort) {
+        AgentTeamRoleExecutionPort roleExecutionPort = (role, input, conversationId) ->
+                agentExecutionPort.executeSync(input, conversationId);
+        return new SubAgentExecutionService(roleExecutionPort, promptProvider);
+    }
 
     @Test
     @DisplayName("should fall back to single agent when request is not safely parallelizable")
@@ -64,7 +80,7 @@ class MasterAgentOrchestratorTest {
                 10L,
                 taskPool,
                 new InMemoryAgentMessageBus(),
-                new SubAgentExecutionService(agentExecutionPort, promptProvider)
+                subAgentExecutionService(agentExecutionPort)
         );
 
         try {
@@ -131,7 +147,7 @@ class MasterAgentOrchestratorTest {
                 10L,
                 taskPool,
                 new InMemoryAgentMessageBus(),
-                new SubAgentExecutionService(agentExecutionPort, promptProvider)
+                subAgentExecutionService(agentExecutionPort)
         );
 
         try {
@@ -203,7 +219,7 @@ class MasterAgentOrchestratorTest {
                 10L,
                 taskPool,
                 new InMemoryAgentMessageBus(),
-                new SubAgentExecutionService(agentExecutionPort, promptProvider)
+                subAgentExecutionService(agentExecutionPort)
         );
 
         try {

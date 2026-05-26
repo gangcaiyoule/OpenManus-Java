@@ -3,9 +3,13 @@ package com.openmanus.infra.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.openmanus.agentteam.application.AgentTeamApplicationService;
 import com.openmanus.agentteam.application.AgentTeamPromptProvider;
+import com.openmanus.agentteam.application.AgentTeamRoleExecutionPort;
+import com.openmanus.agentteam.application.AgentTeamRoleExecutionService;
 import com.openmanus.agentteam.application.MasterAgentOrchestrator;
+import com.openmanus.agentteam.application.SubAgentToolPolicy;
 import com.openmanus.agentteam.application.SubAgentExecutionService;
 import com.openmanus.agentteam.application.TaskDecompositionService;
+import com.openmanus.agentteam.application.TeamMasterToolPolicy;
 import com.openmanus.agentteam.domain.port.AgentMessageBusPort;
 import com.openmanus.agentteam.domain.port.TaskGroupRepositoryPort;
 import com.openmanus.agentteam.domain.port.TaskPoolPort;
@@ -14,13 +18,17 @@ import com.openmanus.agentteam.domain.service.DefaultTaskGroupManager;
 import com.openmanus.agentteam.domain.service.ResultAggregationService;
 import com.openmanus.agentteam.domain.service.TaskGroupManager;
 import com.openmanus.agentteam.domain.service.TaskGroupStatusCalculator;
+import com.openmanus.agentteam.infra.AgentTeamCoordinatorFactory;
 import com.openmanus.agentteam.infra.ClasspathAgentTeamPromptProvider;
 import com.openmanus.agentteam.infra.InMemoryAgentMessageBus;
 import com.openmanus.agentteam.infra.InMemoryTaskGroupRepository;
 import com.openmanus.agentteam.infra.InMemoryTaskPool;
 import com.openmanus.agentteam.infra.SubAgentWorkerManager;
 import com.openmanus.aiframework.runtime.AiChatModel;
+import com.openmanus.aiframework.runtime.AiMemoryProvider;
+import com.openmanus.aiframework.runtime.AiSessionSandboxGateway;
 import com.openmanus.domain.service.AgentExecutionPort;
+import com.openmanus.domain.service.ExecutionEventPort;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -71,6 +79,16 @@ public class AgentTeamConfig {
     }
 
     @Bean
+    TeamMasterToolPolicy teamMasterToolPolicy() {
+        return new TeamMasterToolPolicy();
+    }
+
+    @Bean
+    SubAgentToolPolicy subAgentToolPolicy() {
+        return new SubAgentToolPolicy();
+    }
+
+    @Bean
     TaskDecompositionService taskDecompositionService(
             AiChatModel aiChatModel,
             ObjectMapper objectMapper,
@@ -80,11 +98,41 @@ public class AgentTeamConfig {
     }
 
     @Bean
+    AgentTeamCoordinatorFactory agentTeamCoordinatorFactory(
+            AiChatModel aiChatModel,
+            AiMemoryProvider aiMemoryProvider,
+            AiSessionSandboxGateway sessionSandboxGateway,
+            OpenManusProperties properties,
+            ExecutionEventPort executionEventPort,
+            LocalAgentToolRegistry localAgentToolRegistry,
+            AgentTeamPromptProvider promptProvider,
+            TeamMasterToolPolicy teamMasterToolPolicy,
+            SubAgentToolPolicy subAgentToolPolicy
+    ) {
+        return new AgentTeamCoordinatorFactory(
+                aiChatModel,
+                aiMemoryProvider,
+                sessionSandboxGateway,
+                properties,
+                executionEventPort,
+                localAgentToolRegistry,
+                promptProvider,
+                teamMasterToolPolicy,
+                subAgentToolPolicy
+        );
+    }
+
+    @Bean
+    AgentTeamRoleExecutionPort agentTeamRoleExecutionPort(AgentTeamCoordinatorFactory coordinatorFactory) {
+        return new AgentTeamRoleExecutionService(coordinatorFactory);
+    }
+
+    @Bean
     SubAgentExecutionService subAgentExecutionService(
-            AgentExecutionPort agentExecutionPort,
+            AgentTeamRoleExecutionPort roleExecutionPort,
             AgentTeamPromptProvider promptProvider
     ) {
-        return new SubAgentExecutionService(agentExecutionPort, promptProvider);
+        return new SubAgentExecutionService(roleExecutionPort, promptProvider);
     }
 
     @Bean(destroyMethod = "close")
