@@ -18,16 +18,16 @@ public class AgentTeamRoleExecutionService implements AgentTeamRoleExecutionPort
     }
 
     @Override
-    public String executeSync(AgentTeamRole role, String input, String conversationId) {
+    public String executeSync(AgentTeamRole role, String input, String memoryId) {
         if (input == null || input.isBlank()) {
             throw new IllegalArgumentException("input cannot be null or blank");
         }
-        Object memoryId = conversationId != null && !conversationId.isBlank()
-                ? conversationId
+        Object runtimeMemoryId = memoryId != null && !memoryId.isBlank()
+                ? memoryId
                 : UUID.randomUUID();
-        try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", String.valueOf(memoryId))) {
+        try (MDC.MDCCloseable ignored = MDC.putCloseable("sessionId", String.valueOf(runtimeMemoryId))) {
             AgentCoordinator coordinator = coordinatorFactory.create(role);
-            return coordinator.execute(input, memoryId);
+            return coordinator.execute(input, runtimeMemoryId);
         }
     }
 }

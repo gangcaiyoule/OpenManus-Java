@@ -27,21 +27,29 @@ public class SubAgentExecutionService {
 
     public SubTaskExecutionOutput execute(SubTask subTask, String agentId) {
         String prompt = buildSubTaskPrompt(subTask, agentId);
-        log.info(
-                "SubAgentExecution dispatching to role-scoped runtime: agentId={}, groupId={}, taskId={}, title={}",
-                agentId,
+        String memoryId = AgentTeamMemoryIds.subAgent(
+                subTask.getParentSessionId(),
                 subTask.getGroupId(),
                 subTask.getTaskId(),
-                subTask.getTitle()
+                agentId
         );
-        String result = roleExecutionPort.executeSync(AgentTeamRole.SUB_AGENT, prompt, subTask.getTaskId());
-        String summary = summarize(result);
         log.info(
-                "SubAgentExecution finished runtime call: agentId={}, groupId={}, taskId={}, title={}, summary={}",
+                "SubAgentExecution dispatching to role-scoped runtime: agentId={}, groupId={}, taskId={}, title={}, memoryId={}",
                 agentId,
                 subTask.getGroupId(),
                 subTask.getTaskId(),
                 subTask.getTitle(),
+                memoryId
+        );
+        String result = roleExecutionPort.executeSync(AgentTeamRole.SUB_AGENT, prompt, memoryId);
+        String summary = summarize(result);
+        log.info(
+                "SubAgentExecution finished runtime call: agentId={}, groupId={}, taskId={}, title={}, memoryId={}, summary={}",
+                agentId,
+                subTask.getGroupId(),
+                subTask.getTaskId(),
+                subTask.getTitle(),
+                memoryId,
                 summary
         );
         return new SubTaskExecutionOutput(summary, result);

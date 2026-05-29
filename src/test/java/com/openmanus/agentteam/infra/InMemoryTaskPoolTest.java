@@ -22,7 +22,7 @@ class InMemoryTaskPoolTest {
     void shouldClaimPendingTaskOnce() {
         InMemoryTaskGroupRepository repository = new InMemoryTaskGroupRepository();
         InMemoryTaskPool taskPool = new InMemoryTaskPool(repository);
-        SubTask subTask = new SubTask("task-1", "group-1", "A", "desc", 1L);
+        SubTask subTask = new SubTask("task-1", "group-1", "parent-1", "A", "desc", 1L);
 
         taskPool.submit(subTask);
 
@@ -39,7 +39,7 @@ class InMemoryTaskPoolTest {
     void shouldPreventDuplicateClaimUnderConcurrency() throws InterruptedException {
         InMemoryTaskGroupRepository repository = new InMemoryTaskGroupRepository();
         InMemoryTaskPool taskPool = new InMemoryTaskPool(repository);
-        taskPool.submit(new SubTask("task-1", "group-1", "A", "desc", 1L));
+        taskPool.submit(new SubTask("task-1", "group-1", "parent-1", "A", "desc", 1L));
 
         AtomicInteger successClaims = new AtomicInteger();
         CountDownLatch ready = new CountDownLatch(2);
