@@ -70,7 +70,7 @@ public class MasterAgentOrchestrator {
                 "team-master",
                 userInput
         );
-        List<SubTask> subTasks = materializeSubTasks(taskGroup.getGroupId(), plan.subTasks());
+        List<SubTask> subTasks = materializeSubTasks(taskGroup.getGroupId(), taskGroup.getParentTaskId(), plan.subTasks());
         log.info(
                 "TeamMaster created task group: groupId={}, conversationId={}, subTaskCount={}",
                 taskGroup.getGroupId(),
@@ -103,15 +103,17 @@ public class MasterAgentOrchestrator {
         return renderFinalAnswer(taskGroup, snapshot, result);
     }
 
-    private List<SubTask> materializeSubTasks(String groupId, List<SubTaskPlan> subTaskPlans) {
+    private List<SubTask> materializeSubTasks(String groupId, String parentSessionId, List<SubTaskPlan> subTaskPlans) {
         List<SubTask> subTasks = new ArrayList<>();
         long now = System.currentTimeMillis();
         for (SubTaskPlan plan : subTaskPlans) {
             subTasks.add(new SubTask(
                     UUID.randomUUID().toString(),
                     groupId,
+                    parentSessionId,
                     plan.title(),
                     plan.description(),
+                    plan.contextSummary(),
                     now
             ));
         }
