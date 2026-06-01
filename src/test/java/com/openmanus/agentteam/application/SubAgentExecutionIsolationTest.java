@@ -49,29 +49,32 @@ class SubAgentExecutionIsolationTest {
 
         assertThat(output.summary()).isEqualTo("done");
         assertThat(output.detail()).isEqualTo("done");
-        assertThat(roleExecutionPort.role).isEqualTo(AgentTeamRole.SUB_AGENT);
+        assertThat(roleExecutionPort.context.role()).isEqualTo(AgentTeamRole.SUB_AGENT);
+        assertThat(roleExecutionPort.context.parentSessionId()).isEqualTo("conv-1");
+        assertThat(roleExecutionPort.context.groupId()).isEqualTo("group-1");
+        assertThat(roleExecutionPort.context.taskId()).isEqualTo("task-1");
+        assertThat(roleExecutionPort.context.agentId()).isEqualTo("agent-1");
+        assertThat(roleExecutionPort.context.depth()).isEqualTo(1);
         assertThat(roleExecutionPort.input).contains("task=Collect API requirements");
         assertThat(roleExecutionPort.input).contains("context=Parent request:\nBuild an API planning document");
-        assertThat(roleExecutionPort.memoryId).isEqualTo("agentteam:conv-1:group-1:task-1:agent-1");
-        assertThat(roleExecutionPort.memoryId).isNotEqualTo("conv-1");
+        assertThat(roleExecutionPort.context.memoryId()).isEqualTo("agentteam:conv-1:group-1:task-1:agent-1");
+        assertThat(roleExecutionPort.context.memoryId()).isNotEqualTo("conv-1");
     }
 
     private static final class RecordingRoleExecutionPort implements AgentTeamRoleExecutionPort {
 
         private final String result;
-        private AgentTeamRole role;
+        private AgentTeamExecutionContext context;
         private String input;
-        private String memoryId;
 
         private RecordingRoleExecutionPort(String result) {
             this.result = result;
         }
 
         @Override
-        public String executeSync(AgentTeamRole role, String input, String memoryId) {
-            this.role = role;
+        public String executeSync(AgentTeamExecutionContext context, String input) {
+            this.context = context;
             this.input = input;
-            this.memoryId = memoryId;
             return result;
         }
     }

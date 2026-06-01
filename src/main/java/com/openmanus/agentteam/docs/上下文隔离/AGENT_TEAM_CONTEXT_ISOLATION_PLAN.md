@@ -58,7 +58,7 @@
 
 ## 4. 上下文分类与隔离策略
 
-### 4.1 聊天上下文（已完成）
+### 4.1 聊天上下文
 
 含义：
 
@@ -84,7 +84,7 @@ agentteam:{parentSessionId}:{groupId}:{taskId}:{agentId}
 
 第一版可以先不做复杂转义，仅保证格式稳定。后续如 sessionId 中存在特殊字符，再补充 sanitize。
 
-### 4.2 任务上下文（已完成）
+### 4.2 任务上下文
 
 含义：
 
@@ -205,7 +205,7 @@ agentteam:{parentSessionId}:{groupId}:{taskId}:{agentId}
 
 ## 5. 分阶段开发计划
 
-## 阶段 A：聊天上下文 memoryId 隔离
+## 阶段 A：聊天上下文 memoryId 隔离（已完成）
 
 目标：
 
@@ -252,7 +252,7 @@ public final class AgentTeamMemoryIds {
 - `SubAgentExecutionIsolationTest`
 - 新增 `AgentTeamMemoryIdsTest`
 
-## 阶段 B：任务上下文切片
+## 阶段 B：任务上下文切片（已完成）
 
 目标：
 
@@ -294,7 +294,7 @@ Complete only this assigned subtask. Return concise evidence and result for Team
 - `SubAgentExecutionIsolationTest`
 - `MasterAgentOrchestratorTest`
 
-## 阶段 C：显式执行上下文
+## 阶段 C：显式执行上下文（已完成）
 
 目标：
 

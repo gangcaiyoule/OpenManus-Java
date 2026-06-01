@@ -60,8 +60,8 @@ class MasterAgentOrchestratorTest {
     };
 
     private SubAgentExecutionService subAgentExecutionService(AgentExecutionPort agentExecutionPort) {
-        AgentTeamRoleExecutionPort roleExecutionPort = (role, input, memoryId) ->
-                agentExecutionPort.executeSync(input, memoryId);
+        AgentTeamRoleExecutionPort roleExecutionPort = (context, input) ->
+                agentExecutionPort.executeSync(input, context.memoryId());
         return new SubAgentExecutionService(roleExecutionPort, promptProvider);
     }
 

@@ -5,5 +5,5 @@ package com.openmanus.agentteam.application;
  */
 public interface AgentTeamRoleExecutionPort {
 
-    String executeSync(AgentTeamRole role, String input, String memoryId);
+    String executeSync(AgentTeamExecutionContext context, String input);
 }

@@ -27,7 +27,7 @@ public class SubAgentExecutionService {
 
     public SubTaskExecutionOutput execute(SubTask subTask, String agentId) {
         String prompt = buildSubTaskPrompt(subTask, agentId);
-        String memoryId = AgentTeamMemoryIds.subAgent(
+        AgentTeamExecutionContext context = AgentTeamExecutionContext.subAgent(
                 subTask.getParentSessionId(),
                 subTask.getGroupId(),
                 subTask.getTaskId(),
@@ -39,9 +39,9 @@ public class SubAgentExecutionService {
                 subTask.getGroupId(),
                 subTask.getTaskId(),
                 subTask.getTitle(),
-                memoryId
+                context.memoryId()
         );
-        String result = roleExecutionPort.executeSync(AgentTeamRole.SUB_AGENT, prompt, memoryId);
+        String result = roleExecutionPort.executeSync(context, prompt);
         String summary = summarize(result);
         log.info(
                 "SubAgentExecution finished runtime call: agentId={}, groupId={}, taskId={}, title={}, memoryId={}, summary={}",
@@ -49,7 +49,7 @@ public class SubAgentExecutionService {
                 subTask.getGroupId(),
                 subTask.getTaskId(),
                 subTask.getTitle(),
-                memoryId,
+                context.memoryId(),
                 summary
         );
         return new SubTaskExecutionOutput(summary, result);
