@@ -31,7 +31,7 @@ class SubAgentExecutionIsolationTest {
 
             @Override
             public String subAgentExecutionPromptTemplate() {
-                return "task={{taskDescription}}";
+                return "task={{taskDescription}}\ncontext={{contextSummary}}";
             }
         };
         SubAgentExecutionService service = new SubAgentExecutionService(roleExecutionPort, promptProvider);
@@ -41,6 +41,7 @@ class SubAgentExecutionIsolationTest {
                 "conv-1",
                 "API",
                 "Collect API requirements",
+                "Parent request:\nBuild an API planning document",
                 System.currentTimeMillis()
         );
 
@@ -49,7 +50,8 @@ class SubAgentExecutionIsolationTest {
         assertThat(output.summary()).isEqualTo("done");
         assertThat(output.detail()).isEqualTo("done");
         assertThat(roleExecutionPort.role).isEqualTo(AgentTeamRole.SUB_AGENT);
-        assertThat(roleExecutionPort.input).isEqualTo("task=Collect API requirements");
+        assertThat(roleExecutionPort.input).contains("task=Collect API requirements");
+        assertThat(roleExecutionPort.input).contains("context=Parent request:\nBuild an API planning document");
         assertThat(roleExecutionPort.memoryId).isEqualTo("agentteam:conv-1:group-1:task-1:agent-1");
         assertThat(roleExecutionPort.memoryId).isNotEqualTo("conv-1");
     }

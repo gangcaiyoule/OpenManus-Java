@@ -63,7 +63,8 @@ public class SubAgentExecutionService {
                         "taskId", safe(subTask.getTaskId()),
                         "groupId", safe(subTask.getGroupId()),
                         "taskTitle", safe(subTask.getTitle()),
-                        "taskDescription", safe(subTask.getDescription())
+                        "taskDescription", safe(subTask.getDescription()),
+                        "contextSummary", safe(subTask.getContextSummary())
                 )
         );
     }

@@ -113,6 +113,7 @@ public class MasterAgentOrchestrator {
                     parentSessionId,
                     plan.title(),
                     plan.description(),
+                    plan.contextSummary(),
                     now
             ));
         }

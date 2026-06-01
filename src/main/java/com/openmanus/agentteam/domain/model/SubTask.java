@@ -13,6 +13,7 @@ public class SubTask {
     private final String parentSessionId;
     private final String title;
     private final String description;
+    private final String contextSummary;
     private final long createdAt;
     private TaskStatus status;
     private String assignedAgentId;
@@ -29,6 +30,7 @@ public class SubTask {
             String parentSessionId,
             String title,
             String description,
+            String contextSummary,
             long createdAt
     ) {
         this.taskId = taskId;
@@ -36,6 +38,7 @@ public class SubTask {
         this.parentSessionId = parentSessionId == null ? "" : parentSessionId.trim();
         this.title = title == null ? "" : title.trim();
         this.description = description == null ? "" : description.trim();
+        this.contextSummary = contextSummary == null ? "" : contextSummary.trim();
         this.createdAt = createdAt;
         this.status = TaskStatus.PENDING;
     }
